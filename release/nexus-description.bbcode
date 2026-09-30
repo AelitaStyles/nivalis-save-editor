@@ -6,9 +6,11 @@ A small, standalone savegame editor for [b]Nivalis Nights[/b] by RenokK. Unoffic
 [*][b]Save browser[/b]: your saves with screenshots, location, in-game day and playtime, found automatically
 [*][b]Money[/b]: set any amount, or add 1,000 / 10,000 / 100,000 credits with one click
 [*][b]Inventory[/b]: edit your inventory, your venues' storage, fridges and furniture, and vendor stock. Add any of 1,300+ items by name, change quantities and freshness, or make all food fresh with one click
+[*][b]People[/b]: edit friendship, romance, business and enemy levels for everyone you've met
+[*][b]Venues[/b]: edit your venues' level, review score, reviews and customers served, and see their seats, staff and storage
 [*][b]Story variables[/b]: browse, search and edit 1,800+ game variables (relationships, venue levels, quest flags, …)
 [*][b]Compare saves[/b]: see exactly what changed between two saves and copy values over
-[*][b]Automatic backups[/b] before every change, and every edit is double-checked before it is written
+[*][b]Backups[/b]: up to 10 compressed backups per save, a comparison of what changed since each one, and one-click restore. The first backup of each save is kept permanently, and every edit is double-checked before it is written
 [*][b]Safe by design[/b]: refuses to save while the game is running, and refuses to open saves from an unknown format version
 [/list]
 
@@ -21,11 +23,13 @@ A small, standalone savegame editor for [b]Nivalis Nights[/b] by RenokK. Unoffic
 
 [size=4][b]Usage[/b][/size]
 Pick a save, change what you like, click [b]Save changes[/b], then load that save in the game.
-Backups are stored in [i]SaveEditorBackups[/i] inside your save folder:
-[code]%USERPROFILE%\AppData\LocalLow\ION LANDS\Nivalis Nights[/code]
+Backups are stored outside the Steam Cloud save folder, in:
+[code]%LOCALAPPDATA%\Nivalis Save Editor\Backups[/code]
+Open the [b]Backups[/b] tab to compare or restore them.
 
 [size=4][b]Good to know[/b][/size]
 [list]
+[*]The People and Venues screens are new in 1.2.0. If a change doesn't show up in the game as expected, please report it (and restore the backup).
 [*]Story variables drive quests and dialogue. Changing them can skip or break quest steps, so experiment on a copy of a save first.
 [*]The in-game clock and text variables are read-only for now.
 [*]Steam Cloud syncs your saves, so an edited save replaces the cloud copy.
@@ -35,6 +39,7 @@ Backups are stored in [i]SaveEditorBackups[/i] inside your save folder:
 
 [size=4][b]Planned[/b][/size]
 [list]
+[*]Skill and inspiration points
 [*]Editing text variables
 [/list]
 

@@ -6,7 +6,7 @@ import {
 } from '../core/index.js';
 import { areaName } from './areas.js';
 import {
-  itemInfo, itemName, ITEM_CHOICES, venueInfo, venueName, vendorName,
+  itemInfo, itemName, ITEM_CHOICES, venueInfo, venueName, vendorName, prettify,
 } from './catalog.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -19,6 +19,10 @@ const state = {
   edits: { moneyCents: undefined, variables: new Map(), inventory: new Map() },
   tab: 'overview',
   invKey: 'PLAYER_INVENTORY',
+  peopleFilters: { q: '', metOnly: true },
+  venueFilters: { ownedOnly: true },
+  backups: null, // { path, list, selected: { id, backup, diff, shot } }
+  backupFolder: null,
   filters: { q: '', group: '', kind: '', modifiedOnly: false },
   compare: null, // { entry, diff }
 };
@@ -74,6 +78,12 @@ function resetEdits() {
 
 function currentValue(v) {
   return state.edits.variables.has(v.name) ? state.edits.variables.get(v.name) : v.value;
+}
+
+function refreshAfterVarEdit() {
+  if (state.tab === 'variables') renderVariableRows();
+  else if (state.tab === 'people') renderPeopleRows();
+  else renderTab();
 }
 
 function setVariableEdit(name, value) {
@@ -144,6 +154,7 @@ async function openSave(entry) {
   $('#main').innerHTML = '<div class="empty"><div class="spinner"></div><p>Reading save…</p></div>';
   resetEdits();
   state.compare = null;
+  state.backups = null;
   renderPending();
   try {
     const save = parseSave(await readBytes(entry.path));
@@ -163,7 +174,7 @@ async function openSave(entry) {
 
 function renderMain() {
   const { entry, summary } = state.current;
-  const tabs = [['overview', 'Overview'], ['inventory', 'Inventory'], ['variables', `Story variables <span class="count">${summary.variableCount}</span>`], ['compare', 'Compare']];
+  const tabs = [['overview', 'Overview'], ['inventory', 'Inventory'], ['people', 'People'], ['venues', 'Venues'], ['variables', `Story variables <span class="count">${summary.variableCount}</span>`], ['compare', 'Compare'], ['backups', 'Backups']];
   $('#main').innerHTML = `
     <div class="save-header">
       <div>
@@ -182,6 +193,12 @@ function renderTab() {
   if (state.tab === 'overview') body.innerHTML = overviewHtml();
   else if (state.tab === 'variables') { body.innerHTML = variablesShellHtml(); renderVariableRows(); }
   else if (state.tab === 'inventory') { body.innerHTML = inventoryShellHtml(); renderInventoryRows(); }
+  else if (state.tab === 'people') { body.innerHTML = peopleShellHtml(); renderPeopleRows(); }
+  else if (state.tab === 'venues') body.innerHTML = venuesHtml();
+  else if (state.tab === 'backups') {
+    body.innerHTML = backupsHtml();
+    if (state.backups?.path !== state.current.entry.path) loadBackups().then(() => { if (state.tab === 'backups') renderTab(); });
+  }
   else body.innerHTML = compareHtml();
 }
 
@@ -373,6 +390,7 @@ function overviewHtml() {
       </div>
       <p class="hint" id="money-hint">Original: ${formatCredits(summary.moneyCents)} credits. Both copies in the save are updated.</p>
     </section>
+    ${financesHtml()}
     <section class="card muted-card">
       <h2>In-game time</h2>
       <p class="hint">Read-only. The clock is stamped into hundreds of world records (schedules, events), so changing it in one place would desync the world.</p>
@@ -441,30 +459,9 @@ function renderVariableRows() {
 function compareHtml() {
   const others = state.saves.filter((s) => s.path !== state.current.entry.path);
   const c = state.compare;
-  let result = '<p class="hint">Pick another save to see what changed between them. Handy for finding which flag a quest step sets.</p>';
-  if (c) {
-    const { header, variables } = c.diff;
-    const headerLabels = { moneyCents: 'Money', gameSeconds: 'In-game time', sceneIndex: 'Location', playtimeSeconds: 'Playtime' };
-    const fmtHeader = (field, v) => field === 'moneyCents' ? formatCredits(v)
-      : field === 'sceneIndex' ? areaName(v)
-        : field === 'playtimeSeconds' ? formatPlaytime(v)
-          : `Day ${Math.floor(v / 86400) + 1}, ${new Date((v % 86400) * 1000).toISOString().slice(11, 16)}`;
-    result = `
-      <div class="card">
-        <h2>Save info</h2>
-        ${header.length ? `<table class="diff"><tbody>${header.map((h) => `<tr><td>${headerLabels[h.field]}</td><td class="before">${escapeHtml(fmtHeader(h.field, h.before))}</td><td>→</td><td class="after">${escapeHtml(fmtHeader(h.field, h.after))}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No differences.</p>'}
-      </div>
-      <div class="card">
-        <h2>Story variables <span class="count">${variables.length}</span></h2>
-        ${variables.length ? `<div class="table-wrap"><table class="diff vars"><thead><tr><th>Variable</th><th>${escapeHtml(displayName(c.entry))}</th><th></th><th>This save</th><th></th></tr></thead><tbody>
-          ${variables.map((v) => `<tr>
-            <td class="key">${escapeHtml(v.name)}</td>
-            <td class="before">${escapeHtml(JSON.stringify(v.before))}</td><td>→</td>
-            <td class="after">${escapeHtml(JSON.stringify(v.after))}</td>
-            <td class="actions">${v.kind !== 'string' && v.before !== undefined ? `<button class="link" data-take="${escapeHtml(v.name)}" title="Stage the other save's value as an edit">Use other value</button>` : ''}</td>
-          </tr>`).join('')}</tbody></table></div>` : '<p class="hint">No differences.</p>'}
-      </div>`;
-  }
+  const result = c
+    ? diffHtml(c.diff, displayName(c.entry), 'This save', { allowTake: true })
+    : '<p class="hint">Pick another save to see what changed between them. Handy for finding which flag a quest step sets.</p>';
   return `
     <div class="toolbar">
       <label>Compare with
@@ -489,6 +486,344 @@ async function runCompare(path) {
     toast(`Cannot compare: ${e.message}`, 'error');
   }
   renderTab();
+}
+
+
+// ---------- people & venues (friendly views over story variables) ----------
+
+const RELATION_FIELDS = [
+  { key: 'Friend', label: 'Friend', seen: '−1 to 5' },
+  { key: 'Romance', label: 'Romance', seen: '0 to 2' },
+  { key: 'Business', label: 'Business', seen: '0 to 3' },
+  { key: 'Enemy', label: 'Enemy', seen: '0 to 1' },
+];
+
+// Editor for one story variable; wires into the same data-var handlers as the Story variables tab.
+function varInput(name, { title = '' } = {}) {
+  const v = state.current.varIndex.get(name);
+  if (!v) return '<span class="subtle">—</span>';
+  const changed = state.edits.variables.has(name);
+  if (v.kind === 'bool') {
+    return `<label class="switch ${changed ? 'modified' : ''}" title="${escapeHtml(title)}"><input type="checkbox" data-var="${escapeHtml(name)}" ${currentValue(v) ? 'checked' : ''}><span></span></label>`;
+  }
+  return `<input class="num small ${changed ? 'modified' : ''}" type="number" step="1" data-var="${escapeHtml(name)}" value="${currentValue(v)}" title="${escapeHtml(title)}">`;
+}
+
+function varValue(name) {
+  const v = state.current.varIndex.get(name);
+  return v ? currentValue(v) : undefined;
+}
+
+function peopleList() {
+  const byGroup = new Map();
+  for (const v of state.current.vars) {
+    if (!v.group || !['Met', ...RELATION_FIELDS.map((f) => f.key)].includes(v.key)) continue;
+    if (!byGroup.has(v.group)) byGroup.set(v.group, new Set());
+    byGroup.get(v.group).add(v.key);
+  }
+  return [...byGroup.entries()]
+    .filter(([, keys]) => RELATION_FIELDS.some((f) => keys.has(f.key)))
+    .map(([group]) => ({ group, name: prettify(group), met: varValue(`${group}.Met`) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function peopleShellHtml() {
+  const f = state.peopleFilters;
+  return `
+    <div class="toolbar">
+      <input id="people-search" type="search" placeholder="Search people…" value="${escapeHtml(f.q)}">
+      <label class="check"><input id="people-met" type="checkbox" ${f.metOnly ? 'checked' : ''}> Met only</label>
+      <span class="subtle" id="people-count"></span>
+    </div>
+    <p class="hint">Relationship levels as the game stores them. The ranges in the column headers are the values seen in real saves so far, not hard limits.</p>
+    <div class="table-wrap">
+      <table class="vars people">
+        <thead><tr><th>Person</th><th>Met</th>${RELATION_FIELDS.map((r) => `<th>${r.label} <span class="subtle">${r.seen}</span></th>`).join('')}</tr></thead>
+        <tbody id="people-rows"></tbody>
+      </table>
+    </div>`;
+}
+
+function renderPeopleRows() {
+  const f = state.peopleFilters;
+  const q = f.q.trim().toLowerCase();
+  const rows = peopleList().filter((p) => (!q || p.name.toLowerCase().includes(q)) && (!f.metOnly || p.met !== false));
+  $('#people-count').textContent = `${rows.length} shown`;
+  $('#people-rows').innerHTML = rows.length ? rows.map((p) => {
+    const names = [`${p.group}.Met`, ...RELATION_FIELDS.map((r) => `${p.group}.${r.key}`)];
+    const changed = names.some((n) => state.edits.variables.has(n));
+    return `<tr class="${changed ? 'modified' : ''}">
+      <td>${escapeHtml(p.name)}</td>
+      <td>${varInput(`${p.group}.Met`)}</td>
+      ${RELATION_FIELDS.map((r) => `<td>${varInput(`${p.group}.${r.key}`)}</td>`).join('')}
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" class="none">Nobody matches.</td></tr>';
+}
+
+// Stats the player may meaningfully change; the rest are recalculated by the game from the world.
+const VENUE_EDITABLE = [
+  ['Level', 'Level'],
+  ['ReviewScore', 'Review score'],
+  ['ReviewAmount', 'Reviews'],
+  ['CustomersServed', 'Customers served'],
+];
+const VENUE_INFO = [
+  ['Seats', 'Seats'], ['BarSeats', 'Bar seats'], ['MenuMeals', 'Meals on menu'], ['MenuDrinks', 'Drinks on menu'],
+  ['StaffTotal', 'Staff'], ['StaffChefs', 'Chefs'], ['StaffWaiters', 'Waiters'], ['StaffCleaners', 'Cleaners'],
+  ['StaffManagers', 'Managers'], ['Storage', 'Storage used'], ['ColdStorage', 'Cold storage used'],
+];
+
+function venueList() {
+  const groups = new Set(state.current.vars.filter((v) => v.group.startsWith('Venue_') && v.key === 'Owned').map((v) => v.group));
+  const idByInternal = new Map();
+  for (const c of state.current.save.inventory.containers) {
+    if (c.kind === 'venue') { const info = venueInfo(c.venueId); if (info) idByInternal.set(info.internal, c.venueId); }
+  }
+  return [...groups].map((group) => {
+    const id = idByInternal.get(group);
+    return { group, id, name: id ? venueName(id) : prettify(group.replace(/^Venue_/, '')), owned: varValue(`${group}.Owned`) === true };
+  }).sort((a, b) => (b.owned - a.owned) || a.name.localeCompare(b.name));
+}
+
+function venuesHtml() {
+  const f = state.venueFilters;
+  const venues = venueList().filter((v) => !f.ownedOnly || v.owned);
+  const cards = venues.map((v) => `
+    <section class="card venue">
+      <div class="venue-head">
+        <h2>${escapeHtml(v.name)}</h2>
+        ${v.owned ? '<span class="badge">Owned</span>' : '<span class="subtle">Not owned</span>'}
+      </div>
+      <div class="venue-grid">
+        ${VENUE_EDITABLE.filter(([k]) => varValue(`${v.group}.${k}`) !== undefined).map(([k, label]) => `
+          <label class="field"><span>${label}</span>${varInput(`${v.group}.${k}`)}</label>`).join('')}
+      </div>
+      <div class="venue-info subtle">
+        ${VENUE_INFO.filter(([k]) => varValue(`${v.group}.${k}`) !== undefined).map(([k, label]) => `${label}: <b>${varValue(`${v.group}.${k}`)}</b>`).join(' · ')}
+      </div>
+      ${v.id ? `<div class="venue-links">${['normal', 'refrigerated', 'furniture'].map((s) => `<button class="link" data-open-container="${escapeHtml(`${v.id}_${{ normal: 'Normal', refrigerated: 'Refridgerated', furniture: 'Furniture' }[s]}Inventory`)}">${STORAGE_LABELS[s]}</button>`).join(' · ')}</div>` : ''}
+    </section>`).join('');
+  return `
+    <div class="toolbar">
+      <label class="check"><input id="venues-owned" type="checkbox" ${f.ownedOnly ? 'checked' : ''}> Owned only</label>
+      <span class="subtle">${venues.length} venue${venues.length === 1 ? '' : 's'}</span>
+    </div>
+    <p class="hint">Level, review score, reviews and customers served can be edited. Seats, staff, menu and storage are shown for information: the game recalculates them from your venue. Ownership can’t be changed here yet, because it is also stored in other parts of the save.</p>
+    ${cards || '<p class="hint">No venues match.</p>'}`;
+}
+
+function financesHtml() {
+  const debts = [['GameState.NoodleBar_Debt', 'Noodle bar debt'], ['GameState.Debt', 'Other debt']]
+    .filter(([n]) => state.current.varIndex.has(n));
+  if (!debts.length) return '';
+  return `
+    <section class="card">
+      <h2>Debt</h2>
+      <div class="venue-grid">
+        ${debts.map(([n, label]) => `<label class="field"><span>${label}</span>${varInput(n)}</label>`).join('')}
+      </div>
+      <p class="hint">Shown exactly as stored in the save.</p>
+    </section>`;
+}
+
+
+// ---------- diffs (shared by Compare and Backups) ----------
+
+const HEADER_LABELS = { moneyCents: 'Money', gameSeconds: 'In-game time', sceneIndex: 'Location', playtimeSeconds: 'Playtime' };
+
+function formatHeaderValue(field, v) {
+  if (field === 'moneyCents') return formatCredits(v);
+  if (field === 'sceneIndex') return areaName(v);
+  if (field === 'playtimeSeconds') return formatPlaytime(v);
+  return `Day ${Math.floor(v / 86400) + 1}, ${new Date((v % 86400) * 1000).toISOString().slice(11, 16)}`;
+}
+
+function containerLabel(key) {
+  const c = state.current.save.inventory.containers.find((x) => x.key === key);
+  if (!c) return key;
+  if (c.kind === 'player') return 'Your inventory';
+  if (c.kind === 'venue') return `${venueName(c.venueId)} · ${STORAGE_LABELS[c.storage]}`;
+  if (c.kind === 'vendor') return `${vendorName(c.vendorId) ?? 'Vendor'} (stock)`;
+  return key;
+}
+
+// Cards listing header, inventory and variable differences. beforeLabel/afterLabel name the columns.
+function diffHtml(diff, beforeLabel, afterLabel, { allowTake = false } = {}) {
+  const { header, variables, inventory } = diff;
+  const headerCard = `
+    <div class="card">
+      <h2>Save info</h2>
+      ${header.length ? `<table class="diff"><tbody>${header.map((h) => `<tr><td>${HEADER_LABELS[h.field]}</td><td class="before">${escapeHtml(formatHeaderValue(h.field, h.before))}</td><td>→</td><td class="after">${escapeHtml(formatHeaderValue(h.field, h.after))}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No differences.</p>'}
+    </div>`;
+  const inventoryCard = `
+    <div class="card">
+      <h2>Inventory <span class="count">${inventory.length}</span></h2>
+      ${inventory.length ? `<div class="table-wrap"><table class="diff vars"><thead><tr><th>Container</th><th>Item</th><th>${escapeHtml(beforeLabel)}</th><th></th><th>${escapeHtml(afterLabel)}</th></tr></thead><tbody>
+        ${inventory.map((c) => `<tr>
+          <td>${escapeHtml(containerLabel(c.container))}</td>
+          <td>${escapeHtml(itemName(c.guid))}</td>
+          <td class="before">${c.before}</td><td>→</td>
+          <td class="after">${c.after}${c.stacksChanged ? ' <span class="subtle">(freshness or stacks changed)</span>' : ''}</td>
+        </tr>`).join('')}</tbody></table></div>` : '<p class="hint">No differences.</p>'}
+    </div>`;
+  const variablesCard = `
+    <div class="card">
+      <h2>Story variables <span class="count">${variables.length}</span></h2>
+      ${variables.length ? `<div class="table-wrap"><table class="diff vars"><thead><tr><th>Variable</th><th>${escapeHtml(beforeLabel)}</th><th></th><th>${escapeHtml(afterLabel)}</th><th></th></tr></thead><tbody>
+        ${variables.map((v) => `<tr>
+          <td class="key">${escapeHtml(v.name)}</td>
+          <td class="before">${escapeHtml(JSON.stringify(v.before))}</td><td>→</td>
+          <td class="after">${escapeHtml(JSON.stringify(v.after))}</td>
+          <td class="actions">${allowTake && v.kind !== 'string' && v.before !== undefined ? `<button class="link" data-take="${escapeHtml(v.name)}" title="Stage the other save's value as an edit">Use other value</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table></div>` : '<p class="hint">No differences.</p>'}
+    </div>`;
+  return headerCard + inventoryCard + variablesCard;
+}
+
+// One-line description of an edit, stored with the backup taken before it.
+function summarizeDiff(diff) {
+  const parts = [];
+  for (const h of diff.header) parts.push(`${HEADER_LABELS[h.field]} ${formatHeaderValue(h.field, h.before)} → ${formatHeaderValue(h.field, h.after)}`);
+  const inv = diff.inventory.filter((c) => c.before !== c.after);
+  for (const c of inv.slice(0, 3)) {
+    const d = c.after - c.before;
+    parts.push(`${d > 0 ? '+' : '−'}${Math.abs(d)} ${itemName(c.guid)}`);
+  }
+  if (inv.length > 3) parts.push(`${inv.length - 3} more item changes`);
+  const fresh = diff.inventory.filter((c) => c.stacksChanged).length;
+  if (fresh) parts.push(`${fresh} item${fresh === 1 ? '' : 's'} freshened or restacked`);
+  for (const v of diff.variables.slice(0, 2)) parts.push(`${v.name} ${JSON.stringify(v.before)} → ${JSON.stringify(v.after)}`);
+  if (diff.variables.length > 2) parts.push(`${diff.variables.length - 2} more variables`);
+  return parts.join(', ') || 'No changes';
+}
+
+// ---------- backups ----------
+
+const BACKUP_KINDS = { edit: 'Before edit', manual: 'Manual', 'before-restore': 'Before restore', imported: 'Imported' };
+
+async function loadBackups() {
+  const path = state.current.entry.path;
+  try {
+    state.backups = { path, list: await invoke('list_backups', { path }), selected: null };
+  } catch (e) {
+    state.backups = { path, list: [], selected: null, error: String(e) };
+  }
+}
+
+function backupsHtml() {
+  const b = state.backups;
+  if (!b || b.path !== state.current.entry.path) return '<div class="empty"><div class="spinner"></div><p>Loading backups…</p></div>';
+  const rows = b.list.map((x) => `
+    <tr class="${b.selected?.id === x.id ? 'selected' : ''}">
+      <td>${formatDate(x.createdMs)}</td>
+      <td>${x.original ? '<span class="badge" title="Kept permanently">Original</span> ' : ''}${BACKUP_KINDS[x.kind] ?? escapeHtml(x.kind)}</td>
+      <td class="note">${escapeHtml(x.note || '—')}</td>
+      <td class="subtle">${(x.size / 1048576).toFixed(1)} MB</td>
+      <td class="actions">
+        <button class="link" data-backup-compare="${x.id}">Compare</button> ·
+        <button class="link" data-backup-restore="${x.id}">Restore</button>${x.original ? '' : ` · <button class="link danger" data-backup-delete="${x.id}">Delete</button>`}
+      </td>
+    </tr>`).join('');
+  const sel = b.selected;
+  return `
+    <div class="toolbar">
+      <button class="btn" id="backup-now">Back up now</button>
+      <span class="subtle">Up to 10 backups per save. The oldest (“Original”) is kept permanently.</span>
+    </div>
+    ${b.error ? `<div class="banner banner-warn inline">${escapeHtml(b.error)}</div>` : ''}
+    <div class="table-wrap">
+      <table class="vars backups">
+        <thead><tr><th>Taken</th><th>Type</th><th>What happened next</th><th>Size</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="none">No backups of this save yet. One is made automatically every time you save changes.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <p class="hint">Stored in <code title="${escapeHtml(state.backupFolder ?? '')}">%LOCALAPPDATA%\\Nivalis Save Editor\\Backups</code>, outside the Steam Cloud save folder.</p>
+    ${sel ? `
+      <h2 class="section-title">Changes since the backup from ${formatDate(sel.backup.createdMs)}</h2>
+      <div class="backup-compare">
+        ${sel.shot ? `<img class="backup-shot" src="${sel.shot}" alt="Screenshot stored with this backup">` : ''}
+        <p class="hint">Left column: the backup. Right column: the save as it is now. Restoring brings back the left column.</p>
+      </div>
+      ${diffHtml(sel.diff, 'Backup', 'Now')}` : ''}`;
+}
+
+async function compareBackup(id) {
+  const backup = state.backups.list.find((x) => x.id === id);
+  $('#tab-body').innerHTML = '<div class="empty"><div class="spinner"></div><p>Reading backup…</p></div>';
+  try {
+    const old = parseSave(new Uint8Array(await invoke('read_backup', { path: state.current.entry.path, id })));
+    let shot = null;
+    if (backup.hasScreenshot) {
+      const png = new Uint8Array(await invoke('read_backup_screenshot', { path: state.current.entry.path, id }));
+      shot = URL.createObjectURL(new Blob([png], { type: 'image/png' }));
+    }
+    if (state.backups.selected?.shot) URL.revokeObjectURL(state.backups.selected.shot);
+    state.backups.selected = { id, backup, diff: diffSaves(old, state.current.save), shot };
+  } catch (e) {
+    toast(`Cannot read backup: ${e.message ?? e}`, 'error');
+  }
+  renderTab();
+}
+
+async function restoreBackup(id) {
+  const { entry } = state.current;
+  const backup = state.backups.list.find((x) => x.id === id);
+  if (await invoke('is_game_running')) {
+    await message('Close Nivalis Nights first, or the game may overwrite the restored save.', { title: 'Game is running', kind: 'warning' });
+    return;
+  }
+  try {
+    parseSave(new Uint8Array(await invoke('read_backup', { path: entry.path, id })));
+  } catch (e) {
+    await message(`This backup can't be read: ${e.message ?? e}`, { title: 'Cannot restore', kind: 'error' });
+    return;
+  }
+  const autosaveWarning = entry.name.toUpperCase() === 'AUTOSAVE'
+    ? '\n\nThis is the autosave: everything you played since this backup will be lost from it.' : '';
+  const pendingWarning = pendingCount() ? '\n\nYour unsaved changes will be discarded.' : '';
+  const ok = await ask(`Restore ${entry.name}.sav to the backup from ${formatDate(backup.createdMs)}?\n\nThe current save is backed up first, so you can undo this.${autosaveWarning}${pendingWarning}`, { title: 'Restore backup', kind: 'warning' });
+  if (!ok) return;
+  try {
+    await invoke('restore_backup', { path: entry.path, id, note: `Restored the backup from ${formatDate(backup.createdMs)}` });
+  } catch (e) {
+    await message(String(e), { title: 'Restore failed', kind: 'error' });
+    return;
+  }
+  toast(`Restored the backup from ${formatDate(backup.createdMs)}.`);
+  await reopenCurrent('backups');
+}
+
+async function deleteBackup(id) {
+  const backup = state.backups.list.find((x) => x.id === id);
+  if (!(await ask(`Delete the backup from ${formatDate(backup.createdMs)}? This can't be undone.`, { title: 'Delete backup', kind: 'warning' }))) return;
+  try {
+    await invoke('delete_backup', { path: state.current.entry.path, id });
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+  await loadBackups();
+  renderTab();
+}
+
+async function backupNow() {
+  try {
+    await invoke('backup_now', { path: state.current.entry.path, note: 'Manual backup' });
+    toast('Backup created.');
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+  await loadBackups();
+  renderTab();
+}
+
+// Reloads the folder and reopens the current save (after a write), keeping the chosen tab.
+async function reopenCurrent(tab) {
+  const path = state.current.entry.path;
+  await loadFolder(state.dir);
+  const fresh = state.saves.find((s) => s.path === path);
+  state.current = null;
+  state.tab = tab;
+  await openSave(fresh);
 }
 
 // ---------- pending changes & saving ----------
@@ -516,21 +851,17 @@ async function saveChanges() {
     await message(e.message, { title: 'Cannot apply changes', kind: 'error' });
     return;
   }
-  const ok = await ask(`Write ${pendingCount()} change(s) to ${entry.name}.sav?\n\nA backup of the current file is stored in the SaveEditorBackups folder first.`, { title: 'Save changes', kind: 'info' });
+  const note = summarizeDiff(diffSaves(save, parseSave(bytes)));
+  const ok = await ask(`Write ${pendingCount()} change(s) to ${entry.name}.sav?\n\nThe current file is backed up first; you can restore it from the Backups tab.`, { title: 'Save changes', kind: 'info' });
   if (!ok) return;
   try {
-    const backup = await invoke('write_save', bytes, { headers: { 'x-save-path': encodeURIComponent(entry.path) } });
-    toast(`Saved. Backup: ${backup}`);
+    await invoke('write_save', bytes, { headers: { 'x-save-path': encodeURIComponent(entry.path), 'x-backup-note': encodeURIComponent(note) } });
+    toast('Saved. The previous version is in the Backups tab.');
   } catch (e) {
     await message(String(e), { title: 'Save failed', kind: 'error' });
     return;
   }
-  const tab = state.tab;
-  await loadFolder(state.dir);
-  const fresh = state.saves.find((s) => s.path === entry.path);
-  state.current = null;
-  state.tab = tab;
-  await openSave(fresh);
+  await reopenCurrent(state.tab);
 }
 
 // ---------- events ----------
@@ -546,8 +877,13 @@ document.addEventListener('click', async (e) => {
     state.edits.moneyCents = next === state.current.summary.moneyCents ? undefined : next;
     renderPending(); renderTab();
   } else if (t.id === 'money-reset') { state.edits.moneyCents = undefined; renderPending(); renderTab(); }
-  else if (t.dataset.revert) { state.edits.variables.delete(t.dataset.revert); renderPending(); renderVariableRows(); }
+  else if (t.dataset.revert) { state.edits.variables.delete(t.dataset.revert); renderPending(); refreshAfterVarEdit(); }
+  else if (t.dataset.openContainer) { state.invKey = t.dataset.openContainer; state.tab = 'inventory'; renderMain(); }
   else if (t.id === 'inv-add') addInventoryItem();
+  else if (t.id === 'backup-now') await backupNow();
+  else if (t.dataset.backupCompare) await compareBackup(Number(t.dataset.backupCompare));
+  else if (t.dataset.backupRestore) await restoreBackup(Number(t.dataset.backupRestore));
+  else if (t.dataset.backupDelete) await deleteBackup(Number(t.dataset.backupDelete));
   else if (t.id === 'inv-fresh-all') makeAllFresh();
   else if (t.id === 'inv-revert') { state.edits.inventory.delete(state.invKey); renderPending(); renderTab(); }
   else if (t.dataset.removeStack) {
@@ -588,6 +924,7 @@ document.addEventListener('input', (e) => {
     $('#money-reset').disabled = state.edits.moneyCents === undefined;
     renderPending();
   } else if (t.id === 'var-search') { state.filters.q = t.value; renderVariableRows(); }
+  else if (t.id === 'people-search') { state.peopleFilters.q = t.value; renderPeopleRows(); }
   else if (t.matches('.inv-qty, .inv-fresh')) {
     const isQty = t.classList.contains('inv-qty');
     const v = Number(t.value);
@@ -604,7 +941,8 @@ document.addEventListener('input', (e) => {
     t.classList.toggle('invalid', !ok);
     if (ok) {
       setVariableEdit(t.dataset.var, Number(t.value));
-      t.closest('tr').classList.toggle('modified', state.edits.variables.has(t.dataset.var));
+      t.classList.toggle('modified', state.edits.variables.has(t.dataset.var));
+      t.closest('tr')?.classList.toggle('modified', state.edits.variables.has(t.dataset.var));
     }
   }
 });
@@ -617,8 +955,10 @@ document.addEventListener('change', (e) => {
   else if (t.id === 'compare-select') runCompare(t.value);
   else if (t.id === 'inv-container') { state.invKey = t.value; renderTab(); }
   else if (t.matches('.inv-qty, .inv-fresh')) renderTab();
-  else if (t.matches('input[type=checkbox][data-var]')) { setVariableEdit(t.dataset.var, t.checked); renderVariableRows(); }
-  else if (t.matches('input.num[data-var]')) renderVariableRows();
+  else if (t.matches('input[type=checkbox][data-var]')) { setVariableEdit(t.dataset.var, t.checked); refreshAfterVarEdit(); }
+  else if (t.matches('input.num[data-var]')) refreshAfterVarEdit();
+  else if (t.id === 'people-met') { state.peopleFilters.metOnly = t.checked; renderPeopleRows(); }
+  else if (t.id === 'venues-owned') { state.venueFilters.ownedOnly = t.checked; renderTab(); }
 });
 
 async function pollGameRunning() {
@@ -636,6 +976,7 @@ async function init() {
       event.preventDefault();
     }
   });
+  invoke('backup_folder').then((p) => { state.backupFolder = p; }).catch(() => {});
   const dir = await invoke('default_save_dir');
   if (dir) await loadFolder(dir);
   else $('#save-list').innerHTML = '<li class="save-list-empty">Save folder not found. Use “Change folder…”.</li>';

@@ -7,11 +7,20 @@ A small desktop editor for **Nivalis Nights** save files (`.sav`), built with Ta
 - Browse, search and edit the game's **1,800+ story variables** (flags and numbers: relationships, venue levels, quest steps, …)
 - **Inventory**: view and edit the items in your inventory, your venues' storage, fridges and furniture, and vendor stock; add any of 1,300+ items, change quantities and freshness
 - **Compare** two saves to see which variables a quest step changed, and copy values across
-- Every write makes a backup first (`SaveEditorBackups/` next to your saves), and every edit is verified by re-reading the result before it is written
+- **People** and **Venues**: friendly editors for relationship levels and venue level/reviews; debt on the overview
+- **Backups**: up to 10 gzip-compressed backups per save in `%LOCALAPPDATA%\Nivalis Save Editor\Backups` (outside Steam Cloud), the first one kept permanently, with a per-backup comparison and one-click, undoable restore. Every edit is verified by re-reading the result before it is written
 
 Saves live in `%USERPROFILE%\AppData\LocalLow\ION LANDS\Nivalis Nights\`. **Close the game before saving.** Steam Cloud syncs this folder, so the edited file becomes the synced version.
 
 Only save version **151** is supported; the editor refuses to open anything else rather than risk corrupting it.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Overview: save details, money and debt](docs/screenshots/overview.png) | ![Inventory: add items, edit quantity and freshness](docs/screenshots/inventory.png) |
+| ![People: relationship levels](docs/screenshots/people.png) | ![Venues: level and reviews](docs/screenshots/venues.png) |
+| ![Backups: history, comparison and restore](docs/screenshots/backups.png) | |
 
 ## Development
 

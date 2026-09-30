@@ -8,10 +8,13 @@ WHAT IT DOES
   - Edit inventories: your own, your venues' storage, fridges and furniture,
     and vendor stock. Add any of 1,300+ items, change quantities and
     freshness, or make all food fresh again
+  - Edit relationships (friend, romance, business, enemy) and your venues'
+    level and reviews, plus your debt
   - Browse, search and edit the game's story variables (relationship values,
     venue levels, quest flags and more)
   - Compare two saves to see what changed between them, and copy values over
-  - Makes a backup before every change
+  - Keeps up to 10 backups of every save, with a comparison of what changed
+    and one-click restore
 
 HOW TO USE
   1. Close Nivalis Nights. The editor will not save while the game is running.
@@ -23,10 +26,16 @@ Your saves are found automatically in:
   %USERPROFILE%\AppData\LocalLow\ION LANDS\Nivalis Nights
 
 BACKUPS
-Before every save the editor copies the original file to the
-"SaveEditorBackups" folder inside your save folder. To undo a change, copy a
-backup back, remove the ".<number>.sav.bak" part so it ends in ".sav" again,
-and overwrite the save.
+Before every change the editor backs up the save. Open the "Backups" tab to
+see up to 10 backups per save, compare any of them with the current save, and
+restore one with a click. The oldest backup (the save before you first edited
+it) is kept permanently. "Back up now" makes an extra backup at any time.
+Restoring also backs up the current save first, so it can be undone.
+
+Backups are stored compressed in
+  %LOCALAPPDATA%\Nivalis Save Editor\Backups
+outside the save folder, so they are not uploaded to Steam Cloud. Backups
+made by older versions of the editor are moved there automatically.
 
 GOOD TO KNOW
   - Story variables control quests and dialogue. Changing them can skip or

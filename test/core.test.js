@@ -103,7 +103,10 @@ for (const file of saveFiles) {
     const rePlayer = re.inventory.containers.find((c) => c.kind === 'player');
     assert.deepEqual(rePlayer.items, playerItems);
     assert.deepEqual(re.inventory.containers.find((c) => c.key === vendorWithStock.key).items, vendorItems);
-    assert.deepEqual(diffSaves(save, re).variables, []);
+    const d = diffSaves(save, re);
+    assert.deepEqual(d.variables, []);
+    assert.ok(d.inventory.some((c) => c.container === player.key && c.guid === newGuid && c.after >= 3));
+    assert.ok(d.inventory.some((c) => c.container === vendorWithStock.key && c.guid === newGuid && c.after === 0));
     const expectedDelta = (37 + 4 + 16) - (37 + 4 + 16 * vendorWithStock.items[0].stacks.length);
     assert.equal(edited.length - save.bytes.length, expectedDelta);
   });

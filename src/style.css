@@ -463,3 +463,39 @@ table.inv .num { width: 96px; }
 
 table.inv td.key { font-family: inherit; font-size: 14px; }
 .stack-sub { padding-left: 18px; }
+
+/* ---------- people, venues, finances ---------- */
+
+.num.small { width: 84px; }
+input.num.modified { border-color: var(--modified-border); background: var(--modified); }
+.switch.modified span { box-shadow: 0 0 0 2px var(--modified-border); }
+table.people td { font-family: inherit; }
+table.people th .subtle { font-weight: 400; }
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.venue-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.venue-head h2 { margin-bottom: 8px; }
+.venue-grid { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.venue-info { margin-top: 10px; font-size: 12px; line-height: 1.7; }
+.venue-info b { color: var(--text); font-weight: 600; }
+.venue-links { margin-top: 8px; font-size: 13px; }
+
+/* ---------- backups ---------- */
+
+table.backups td { white-space: nowrap; }
+table.backups td.note { white-space: normal; font-size: 13px; }
+table.backups tr.selected { background: var(--accent-soft); }
+.link.danger { color: var(--error); }
+.section-title { margin: 24px 0 12px; font-size: 16px; }
+.backup-compare { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+.backup-shot { width: 240px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+code { font-family: var(--mono); font-size: 12px; }

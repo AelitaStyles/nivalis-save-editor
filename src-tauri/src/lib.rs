@@ -1,13 +1,14 @@
-// Thin native layer: locating, reading and safely writing save files.
+// Thin native layer: locating, reading and safely writing save files, and the backup store.
 // All save-format knowledge lives in the JavaScript core module.
 
+mod backups;
+
+use backups::Backup;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::ipc::{InvokeBody, Request, Response};
-
-const BACKUP_DIR: &str = "SaveEditorBackups";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,8 +30,26 @@ fn millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
+fn now_ms() -> u64 {
+    millis(SystemTime::now())
+}
+
+fn existing_save(path: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(path);
+    if !has_extension(&p, "sav") || !p.is_file() {
+        return Err(format!("{} is not an existing .sav file", p.display()));
+    }
+    Ok(p)
+}
+
+
+
 #[tauri::command]
 fn default_save_dir() -> Option<String> {
+    // Development/screenshots: open a different folder instead of the game's.
+    if let Some(dir) = std::env::var_os("NIVALIS_SAVE_DIR").filter(|d| Path::new(d).is_dir()) {
+        return Some(dir.to_string_lossy().into_owned());
+    }
     let profile = std::env::var_os("USERPROFILE")?;
     let dir = PathBuf::from(profile)
         .join("AppData")
@@ -42,6 +61,10 @@ fn default_save_dir() -> Option<String> {
 
 #[tauri::command]
 fn list_saves(dir: String) -> Result<Vec<SaveEntry>, String> {
+    // Backups made by editor v1.0/1.1 lived inside the (Steam Cloud-synced) save folder; move them.
+    if let Err(e) = backups::migrate_legacy(Path::new(&dir)) {
+        eprintln!("Legacy backup migration failed: {e}");
+    }
     let entries = fs::read_dir(&dir).map_err(|e| format!("Cannot open folder {dir}: {e}"))?;
     let mut saves = Vec::new();
     for entry in entries.flatten() {
@@ -94,10 +117,10 @@ fn percent_decode(input: &str) -> Result<String, String> {
     String::from_utf8(out).map_err(|e| e.to_string())
 }
 
-// Body: raw save bytes. Header `x-save-path`: percent-encoded target path.
+// Body: raw save bytes. Headers `x-save-path` and `x-backup-note`: percent-encoded.
 // Backs up the current file, then writes atomically via a temp file + rename.
 #[tauri::command]
-fn write_save(request: Request<'_>) -> Result<String, String> {
+fn write_save(request: Request<'_>) -> Result<Backup, String> {
     let InvokeBody::Raw(data) = request.body() else {
         return Err("Expected raw save bytes".into());
     };
@@ -106,26 +129,48 @@ fn write_save(request: Request<'_>) -> Result<String, String> {
         .get("x-save-path")
         .and_then(|v| v.to_str().ok())
         .ok_or("Missing save path")?;
-    let path = PathBuf::from(percent_decode(encoded)?);
-    if !has_extension(&path, "sav") || !path.is_file() {
-        return Err(format!("{} is not an existing .sav file", path.display()));
-    }
+    let path = existing_save(&percent_decode(encoded)?)?;
+    let note = match request.headers().get("x-backup-note").and_then(|v| v.to_str().ok()) {
+        Some(n) => percent_decode(n)?,
+        None => String::new(),
+    };
+    backups::write_with_backup(&path, data, now_ms(), &note)
+}
 
-    let dir = path.parent().ok_or("Save has no parent folder")?;
-    let backup_dir = dir.join(BACKUP_DIR);
-    fs::create_dir_all(&backup_dir).map_err(|e| format!("Cannot create backup folder: {e}"))?;
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let backup = backup_dir.join(format!("{stem}.{stamp}.sav.bak"));
-    fs::copy(&path, &backup).map_err(|e| format!("Backup failed, nothing was written: {e}"))?;
+#[tauri::command]
+fn backup_now(path: String, note: String) -> Result<Backup, String> {
+    backups::backup_current(&existing_save(&path)?, now_ms(), "manual", &note)
+}
 
-    let tmp = path.with_extension("sav.tmp");
-    fs::write(&tmp, data).map_err(|e| format!("Cannot write temp file: {e}"))?;
-    fs::rename(&tmp, &path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("Cannot replace save: {e}")
-    })?;
-    Ok(backup.to_string_lossy().into_owned())
+#[tauri::command]
+fn list_backups(path: String) -> Result<Vec<Backup>, String> {
+    backups::list(Path::new(&path))
+}
+
+#[tauri::command]
+fn read_backup(path: String, id: u64) -> Result<Response, String> {
+    backups::read(Path::new(&path), id).map(Response::new)
+}
+
+#[tauri::command]
+fn read_backup_screenshot(path: String, id: u64) -> Result<Response, String> {
+    backups::read_screenshot(Path::new(&path), id).map(Response::new)
+}
+
+#[tauri::command]
+fn delete_backup(path: String, id: u64) -> Result<(), String> {
+    backups::delete(Path::new(&path), id)
+}
+
+#[tauri::command]
+fn backup_folder() -> Result<String, String> {
+    backups::store_root().map(|p| p.to_string_lossy().into_owned())
+}
+
+// Restores a backup over the save. The current save is backed up first, so a restore can be undone.
+#[tauri::command]
+fn restore_backup(path: String, id: u64, note: String) -> Result<Backup, String> {
+    backups::restore(&existing_save(&path)?, id, now_ms(), &note)
 }
 
 #[tauri::command]
@@ -156,6 +201,13 @@ pub fn run() {
             list_saves,
             read_file,
             write_save,
+            backup_now,
+            list_backups,
+            read_backup,
+            read_backup_screenshot,
+            delete_backup,
+            backup_folder,
+            restore_backup,
             is_game_running
         ])
         .run(tauri::generate_context!())

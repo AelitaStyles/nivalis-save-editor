@@ -379,7 +379,9 @@ function concat(parts) {
   return out;
 }
 
-// Differences between two saves: header values and variables.
+// Differences between two saves: header values, variables and inventory quantities.
+// Inventory entries: { container, guid, before, after } with total quantities; stacksChanged marks
+// items whose quantity is equal but whose stacks (freshness, day, price) differ.
 export function diffSaves(a, b) {
   const headerFields = ['sceneIndex', 'gameSeconds', 'moneyCents', 'playtimeSeconds'];
   const header = headerFields
@@ -394,5 +396,34 @@ export function diffSaves(a, b) {
     before.delete(e.name);
   }
   for (const old of before.values()) variables.push({ name: old.name, kind: old.kind, before: old.value, after: undefined });
-  return { header, variables };
+  return { header, variables, inventory: diffInventories(a.inventory, b.inventory) };
+}
+
+function diffInventories(a, b) {
+  const summarize = (items) => {
+    const m = new Map();
+    for (const it of items) {
+      const e = m.get(it.guid) ?? { qty: 0, stacks: [] };
+      e.qty += it.stacks.reduce((n, s) => n + s.quantity, 0);
+      e.stacks.push(...it.stacks);
+      m.set(it.guid, e);
+    }
+    return m;
+  };
+  const oldByKey = new Map(a.containers.map((c) => [c.key, c]));
+  const changes = [];
+  for (const c of b.containers) {
+    const before = summarize(oldByKey.get(c.key)?.items ?? []);
+    const after = summarize(c.items);
+    for (const guid of new Set([...before.keys(), ...after.keys()])) {
+      const x = before.get(guid);
+      const y = after.get(guid);
+      if ((x?.qty ?? 0) !== (y?.qty ?? 0)) {
+        changes.push({ container: c.key, guid, before: x?.qty ?? 0, after: y?.qty ?? 0 });
+      } else if (JSON.stringify(x.stacks) !== JSON.stringify(y.stacks)) {
+        changes.push({ container: c.key, guid, before: x.qty, after: y.qty, stacksChanged: true });
+      }
+    }
+  }
+  return changes;
 }
