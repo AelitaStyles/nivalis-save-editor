@@ -97,6 +97,12 @@ node scripts/build-item-catalog.mjs "C:/Program Files (x86)/Steam/steamapps/comm
 
 **Not decoded yet.** Text variable edits (size-changing, like inventories) and the player position (floats at the end of the file).
 
+## AI transparency
+
+This project was built with the help of Claude Opus 5.5 (Anthropic) as a coding assistant. Claude did most of the save-format reverse engineering and wrote most of the code under RenokK's direction. RenokK set the goals, tested the editor in-game with real saves, and approves each release. The test suite (`npm test`) runs every kind of edit against real save files.
+
+The app itself contains no AI features and makes no network requests; it only reads and writes local save files.
+
 ## License
 
 Copyright (c) 2026 RenokK. Licensed under [CC BY-NC 4.0](LICENSE.txt). You may share and modify it for noncommercial purposes with attribution; commercial use, including reselling or bundling it into commercial products, is not permitted.
