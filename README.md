@@ -5,6 +5,7 @@ A small desktop editor for **Nivalis Nights** save files (`.sav`), built with Ta
 - Browse your saves with their screenshots, location, in-game day and playtime
 - Edit **money**
 - Browse, search and edit the game's **1,800+ story variables** (flags and numbers: relationships, venue levels, quest steps, …)
+- **Inventory**: view and edit the items in your inventory, your venues' storage, fridges and furniture, and vendor stock; add any of 1,300+ items, change quantities and freshness
 - **Compare** two saves to see which variables a quest step changed, and copy values across
 - Every write makes a backup first (`SaveEditorBackups/` next to your saves), and every edit is verified by re-reading the result before it is written
 
@@ -78,7 +79,23 @@ Layout: `int32 count`, then for each entry `string name, int32 type, value`. Int
 
 **In-game time.** The clock value is also stamped into hundreds of world records, so the editor keeps it read-only.
 
-**Not decoded yet.** Inventory contents (`PLAYER_INVENTORY` containers), item names (32-hex asset GUIDs that can be resolved from `resources.assets`), and the player position (floats at the end of the file).
+**Inventories** (section key `2605882F-31F5-4D75-9F72-802B33601A6B`). The section holds an `int32` container count, then the containers: the player's (`PLAYER_INVENTORY`), three per venue (`<venue>_NormalInventory`, `_RefridgeratedInventory`, `_FurnitureInventory`) and one per vendor (keyed by the vendor's GUID).
+
+| Part | Layout |
+|---|---|
+| Container | `string key, byte flagA (1 = vendor), byte flagB, int32 itemCount, items, 12-byte trailer (byte hasCapacity, int32 capacity, …)` |
+| Item | `string itemGuid, int32 stackCount, stacks` |
+| Stack | `int32 price paid (cents), int32 day acquired, int32 quantity, int32 freshness` |
+
+Freshness is counted in 8-hour units and drops at 00:00, 08:00 and 16:00; 0 means the item doesn't spoil. Inventory edits change the file size, so the editor re-encodes the section and shifts every later Ghost block end offset.
+
+**Item names.** Item GUIDs are the ids of item definitions in the game's asset files. `scripts/build-item-catalog.mjs` extracts names, base prices, freshness and refrigeration flags, plus vendor and venue names, into `src/data/items.json`:
+
+```sh
+node scripts/build-item-catalog.mjs "C:/Program Files (x86)/Steam/steamapps/common/Nivalis Nights"
+```
+
+**Not decoded yet.** Text variable edits (size-changing, like inventories) and the player position (floats at the end of the file).
 
 ## License
 

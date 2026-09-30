@@ -6,13 +6,19 @@
 //   variables     articy global variables, stored twice with different type enums
 //   Ghost blocks  "Ghost_<guid>" tag, int32 absolute end offset, payload, closing tag
 //   player money  int32 cents directly after the player's Ghost block (duplicate of the header value)
+//   inventories   see inventory.js
 //
-// Phase 1 only performs same-size edits (int32 / bool), so no offsets ever move.
+// Money and variable edits are same-size. Inventory edits re-encode the inventory section, which can
+// change the file size; every Ghost block after the section then gets its end offset shifted.
 
 import {
   readInt32, writeInt32, readFloat32, readString, encodeString,
   asciiBytes, indexOf, bytesEqual,
 } from './binary.js';
+import { SaveFormatError, UnsupportedEditError } from './errors.js';
+import { parseInventory, encodeInventoryBody, validateInventoryItems } from './inventory.js';
+
+export { SaveFormatError, UnsupportedEditError };
 
 export const SUPPORTED_VERSION = 151;
 export const INT32_MAX = 2147483647;
@@ -25,20 +31,6 @@ export const VARIABLE_TABLES = [
 const PLAYER_MANAGER_TAG = 'Guid_PLAYER_MANAGER_SAVE';
 const GHOST_PREFIX = asciiBytes('Ghost_');
 const END_HEADER = asciiBytes('END_HEADER');
-
-export class SaveFormatError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'SaveFormatError';
-  }
-}
-
-export class UnsupportedEditError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'UnsupportedEditError';
-  }
-}
 
 function parseHeader(bytes) {
   if (bytes.length < 32) throw new SaveFormatError('File is too small to be a Nivalis Nights save');
@@ -145,6 +137,7 @@ export function parseSave(input) {
   if (ghostBlocks.length === 0) throw new SaveFormatError('No Ghost blocks found');
   const tables = VARIABLE_TABLES.map((def) => parseVariableTable(bytes, def));
   const playerMoney = locatePlayerMoney(bytes, ghostBlocks);
+  const inventory = parseInventory(bytes);
 
   const warnings = [];
   if (playerMoney.value !== header.moneyCents) {
@@ -166,7 +159,13 @@ export function parseSave(input) {
     warnings.push('Variable tables have different lengths');
   }
 
-  return { bytes, header, ghostBlocks, tables, playerMoney, tablesConsistent, warnings };
+  return { bytes, header, ghostBlocks, tables, playerMoney, inventory, tablesConsistent, warnings };
+}
+
+// Current in-game day as the game counts it (GameDay.Day, 1-based); used for newly added stacks.
+export function currentGameDay(save) {
+  const entry = save.tables[0].entries.find((e) => e.name === 'GameDay.Day');
+  return entry && entry.kind === 'int' ? entry.value : Math.floor(save.header.gameSeconds / 86400) + 1;
 }
 
 // Variables as a flat, UI-friendly list; group is the articy namespace before the first dot.
@@ -208,8 +207,9 @@ export function formatCredits(cents) {
   return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
 }
 
-// Returns a new byte array with the edits applied. `edits` = { moneyCents?, variables?: { name: value } }.
-// Only same-size edits are supported; the result is re-parsed and verified before being returned.
+// Returns a new byte array with the edits applied and verified:
+//   edits = { moneyCents?, variables?: { name: value }, inventory?: { containerKey: items[] } }
+// Inventory entries replace the full item list of that container ({ guid, stacks: [{ price, day, quantity, freshness }] }).
 export function applyEdits(save, edits) {
   const out = new Uint8Array(save.bytes);
   const changedOffsets = new Set();
@@ -252,19 +252,66 @@ export function applyEdits(save, edits) {
     }
   }
 
-  verifyEdited(save, out, edits, changedOffsets);
-  return out;
-}
-
-function verifyEdited(original, bytes, edits, changedOffsets) {
-  if (bytes.length !== original.bytes.length) throw new SaveFormatError('Edited file changed size');
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] !== original.bytes[i] && !changedOffsets.has(i)) {
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] !== save.bytes[i] && !changedOffsets.has(i)) {
       throw new SaveFormatError(`Unexpected byte change at 0x${i.toString(16)}`);
     }
   }
+
+  const invEdits = new Map(Object.entries(edits.inventory ?? {}));
+  const result = invEdits.size ? spliceInventory(save, out, invEdits) : out;
+  verifyEdited(save, result, edits);
+  return result;
+}
+
+// Re-encodes the inventory section with the edited containers and shifts all later Ghost block end offsets.
+function spliceInventory(save, bytes, invEdits) {
+  const { inventory } = save;
+  for (const [key, items] of invEdits) {
+    if (!inventory.containers.some((c) => c.key === key)) throw new UnsupportedEditError(`Unknown container ${key}`);
+    try {
+      validateInventoryItems(key, items);
+    } catch (e) {
+      throw new UnsupportedEditError(e.message);
+    }
+  }
+  const containers = inventory.containers.map((c) => (invEdits.has(c.key) ? { ...c, items: invEdits.get(c.key) } : c));
+  const body = encodeInventoryBody(containers);
+  const { bodyStart, end } = inventory;
+  const delta = body.length - (end - bodyStart);
+
+  const result = new Uint8Array(bytes.length + delta);
+  result.set(bytes.subarray(0, bodyStart), 0);
+  result.set(body, bodyStart);
+  result.set(bytes.subarray(end), bodyStart + body.length);
+
+  for (const g of save.ghostBlocks) {
+    if (g.start < end && g.end > bodyStart) throw new SaveFormatError('A Ghost block overlaps the inventory section');
+    if (g.start >= end) writeInt32(result, g.endOffsetPos + delta, g.end + delta);
+  }
+
+  // Everything outside the section must be unchanged apart from the shifted Ghost end offsets.
+  const shiftedOffsetFields = new Set();
+  for (const g of save.ghostBlocks) {
+    if (g.start >= end) for (let i = 0; i < 4; i++) shiftedOffsetFields.add(g.endOffsetPos + delta + i);
+  }
+  for (let i = 0; i < bodyStart; i++) {
+    if (result[i] !== bytes[i]) throw new SaveFormatError(`Unexpected byte change at 0x${i.toString(16)}`);
+  }
+  for (let i = end; i < bytes.length; i++) {
+    if (result[i + delta] !== bytes[i] && !shiftedOffsetFields.has(i + delta)) {
+      throw new SaveFormatError(`Unexpected byte change at 0x${(i + delta).toString(16)}`);
+    }
+  }
+  return result;
+}
+
+function verifyEdited(original, bytes, edits) {
   const reparsed = parseSave(bytes);
   if (reparsed.ghostBlocks.length !== original.ghostBlocks.length) throw new SaveFormatError('Ghost block index changed after edit');
+  reparsed.ghostBlocks.forEach((g, i) => {
+    if (g.tag !== original.ghostBlocks[i].tag) throw new SaveFormatError(`Ghost block ${i} changed identity after edit`);
+  });
   if (!reparsed.tablesConsistent) throw new SaveFormatError('Variable tables inconsistent after edit');
   if (edits.moneyCents !== undefined
       && (reparsed.header.moneyCents !== edits.moneyCents || reparsed.playerMoney.value !== edits.moneyCents)) {
@@ -274,6 +321,17 @@ function verifyEdited(original, bytes, edits, changedOffsets) {
   for (const [name, value] of Object.entries(edits.variables ?? {})) {
     if (vars.get(name) !== value) throw new SaveFormatError(`${name} did not verify after edit`);
   }
+  const invEdits = edits.inventory ?? {};
+  if (reparsed.inventory.containers.length !== original.inventory.containers.length) {
+    throw new SaveFormatError('Container count changed after edit');
+  }
+  reparsed.inventory.containers.forEach((c, i) => {
+    const before = original.inventory.containers[i];
+    const expected = invEdits[c.key] ?? before.items;
+    if (c.key !== before.key || !bytesEqual(encodeInventoryBody([{ ...c }]), encodeInventoryBody([{ ...before, items: expected }]))) {
+      throw new SaveFormatError(`Container ${c.key} did not verify after edit`);
+    }
+  });
 }
 
 // Re-encodes the parsed structures and compares them with the original bytes; proves the model is lossless.
@@ -292,6 +350,10 @@ export function roundTripCheck(save) {
     if (!bytesEqual(encoded, save.bytes.subarray(table.start, table.end))) {
       problems.push(`Variable table ${table.id} does not re-encode identically`);
     }
+  }
+  const { inventory } = save;
+  if (!bytesEqual(encodeInventoryBody(inventory.containers), save.bytes.subarray(inventory.bodyStart, inventory.end))) {
+    problems.push('Inventory section does not re-encode identically');
   }
   const money = save.header.moneyCents;
   if (readInt32(save.bytes, save.header.moneyOffset) !== money) problems.push('Header money mismatch');

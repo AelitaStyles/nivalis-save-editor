@@ -2,9 +2,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open, ask, message } from '@tauri-apps/plugin-dialog';
 import {
-  parseSave, summarize, listVariables, diffSaves, applyEdits, formatCredits, INT32_MAX,
+  parseSave, summarize, listVariables, diffSaves, applyEdits, formatCredits, currentGameDay, INT32_MAX,
 } from '../core/index.js';
 import { areaName } from './areas.js';
+import {
+  itemInfo, itemName, ITEM_CHOICES, venueInfo, venueName, vendorName,
+} from './catalog.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -13,8 +16,9 @@ const state = {
   saves: [],
   thumbs: new Map(), // path -> blob URL
   current: null, // { entry, save, summary, vars, varIndex }
-  edits: { moneyCents: undefined, variables: new Map() },
+  edits: { moneyCents: undefined, variables: new Map(), inventory: new Map() },
   tab: 'overview',
+  invKey: 'PLAYER_INVENTORY',
   filters: { q: '', group: '', kind: '', modifiedOnly: false },
   compare: null, // { entry, diff }
 };
@@ -61,11 +65,11 @@ function toast(text, kind = 'ok') {
 }
 
 function pendingCount() {
-  return (state.edits.moneyCents !== undefined ? 1 : 0) + state.edits.variables.size;
+  return (state.edits.moneyCents !== undefined ? 1 : 0) + state.edits.variables.size + state.edits.inventory.size;
 }
 
 function resetEdits() {
-  state.edits = { moneyCents: undefined, variables: new Map() };
+  state.edits = { moneyCents: undefined, variables: new Map(), inventory: new Map() };
 }
 
 function currentValue(v) {
@@ -159,7 +163,7 @@ async function openSave(entry) {
 
 function renderMain() {
   const { entry, summary } = state.current;
-  const tabs = [['overview', 'Overview'], ['variables', `Story variables <span class="count">${summary.variableCount}</span>`], ['compare', 'Compare']];
+  const tabs = [['overview', 'Overview'], ['inventory', 'Inventory'], ['variables', `Story variables <span class="count">${summary.variableCount}</span>`], ['compare', 'Compare']];
   $('#main').innerHTML = `
     <div class="save-header">
       <div>
@@ -177,8 +181,166 @@ function renderTab() {
   const body = $('#tab-body');
   if (state.tab === 'overview') body.innerHTML = overviewHtml();
   else if (state.tab === 'variables') { body.innerHTML = variablesShellHtml(); renderVariableRows(); }
+  else if (state.tab === 'inventory') { body.innerHTML = inventoryShellHtml(); renderInventoryRows(); }
   else body.innerHTML = compareHtml();
 }
+
+// ---------- inventory ----------
+
+const STORAGE_LABELS = { normal: 'Storage', refrigerated: 'Fridge', furniture: 'Furniture' };
+
+function isVenueOwned(venueId) {
+  const venue = venueInfo(venueId);
+  const owned = venue && state.current.varIndex.get(`${venue.internal}.Owned`);
+  return owned?.value === true || state.current.save.header.guids.includes(venueId);
+}
+
+// Containers grouped for the picker; empty containers without a known name are hidden.
+function containerGroups() {
+  const groups = { player: [], owned: [], venues: [], vendors: [] };
+  for (const c of state.current.save.inventory.containers) {
+    const count = inventoryItems(c.key).length;
+    if (c.kind === 'player') groups.player.push({ key: c.key, label: 'Your inventory', count });
+    else if (c.kind === 'venue') {
+      const label = `${venueName(c.venueId)} · ${STORAGE_LABELS[c.storage]}`;
+      (isVenueOwned(c.venueId) ? groups.owned : groups.venues).push({ key: c.key, label, count });
+    } else if (c.kind === 'vendor') {
+      const name = vendorName(c.vendorId);
+      if (name || count) groups.vendors.push({ key: c.key, label: name ?? `Vendor ${c.key.slice(0, 8)}`, count });
+    }
+  }
+  for (const g of [groups.owned, groups.venues, groups.vendors]) g.sort((a, b) => a.label.localeCompare(b.label));
+  return groups;
+}
+
+function inventoryContainer(key) {
+  return state.current.save.inventory.containers.find((c) => c.key === key);
+}
+
+function inventoryItems(key) {
+  return state.edits.inventory.get(key) ?? inventoryContainer(key).items;
+}
+
+// Returns an editable copy of the container's items; call commitInventory(key) after changing it.
+function editableItems(key) {
+  if (!state.edits.inventory.has(key)) state.edits.inventory.set(key, structuredClone(inventoryContainer(key).items));
+  return state.edits.inventory.get(key);
+}
+
+function commitInventory(key) {
+  const items = state.edits.inventory.get(key).filter((it) => it.stacks.length);
+  if (JSON.stringify(items) === JSON.stringify(inventoryContainer(key).items)) state.edits.inventory.delete(key);
+  else state.edits.inventory.set(key, items);
+  renderPending();
+}
+
+function freshnessLabel(units) {
+  const days = units / 3;
+  return days >= 1 ? `≈ ${Number.isInteger(days) ? days : days.toFixed(1)} days` : `≈ ${units * 8} h`;
+}
+
+function inventoryShellHtml() {
+  const groups = containerGroups();
+  const option = (o) => `<option value="${escapeHtml(o.key)}" ${o.key === state.invKey ? 'selected' : ''}>${escapeHtml(o.label)}${o.count ? ` (${o.count})` : ''}</option>`;
+  const group = (label, list) => (list.length ? `<optgroup label="${label}">${list.map(option).join('')}</optgroup>` : '');
+  const container = inventoryContainer(state.invKey);
+  const changed = state.edits.inventory.has(state.invKey);
+  return `
+    <div class="toolbar">
+      <label>Container
+        <select id="inv-container">
+          ${group('You', groups.player)}${group('Your venues', groups.owned)}${group('Other venues', groups.venues)}${group('Vendor stock', groups.vendors)}
+        </select>
+      </label>
+      <span class="subtle" id="inv-summary"></span>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="inv-fresh-all" title="Set every perishable stack in this container to full freshness">Make all fresh</button>
+      ${changed ? '<button class="btn btn-ghost" id="inv-revert">Revert container</button>' : ''}
+    </div>
+    ${container.kind === 'vendor' ? '<p class="hint">Vendor stock is what this vendor currently has for sale. The game restocks vendors on its own schedule.</p>' : ''}
+    <div class="card add-item">
+      <h2>Add item</h2>
+      <div class="add-row">
+        <input id="inv-add-search" type="search" list="inv-item-list" placeholder="Search ${ITEM_CHOICES.length.toLocaleString()} items… e.g. Whiskey, Pork, Blender" autocomplete="off">
+        <datalist id="inv-item-list">${ITEM_CHOICES.map((c) => `<option value="${escapeHtml(c.label)}"></option>`).join('')}</datalist>
+        <input id="inv-add-qty" class="num" type="number" min="1" step="1" value="1" aria-label="Quantity">
+        <button class="btn btn-primary" id="inv-add">Add</button>
+      </div>
+      <p class="hint" id="inv-add-hint">Added items are free (price paid 0) and start fully fresh.</p>
+    </div>
+    <div class="table-wrap">
+      <table class="vars inv">
+        <thead><tr><th>Item</th><th>Quantity</th><th>Freshness</th><th>Acquired</th><th>Paid</th><th></th></tr></thead>
+        <tbody id="inv-rows"></tbody>
+      </table>
+    </div>`;
+}
+
+function renderInventoryRows() {
+  const key = state.invKey;
+  const items = inventoryItems(key);
+  const original = new Map(inventoryContainer(key).items.map((it) => [it.guid, JSON.stringify(it.stacks)]));
+  const total = items.reduce((n, it) => n + it.stacks.reduce((m, s) => m + s.quantity, 0), 0);
+  const { capacity } = inventoryContainer(key);
+  $('#inv-summary').textContent = `${items.length} item types · ${total.toLocaleString()} units${capacity && capacity < 999999 ? ` · capacity ${capacity.toLocaleString()}` : ''}`;
+  if (!items.length) {
+    $('#inv-rows').innerHTML = '<tr><td colspan="6" class="none">This container is empty.</td></tr>';
+    return;
+  }
+  $('#inv-rows').innerHTML = items.map((it, i) => {
+    const info = itemInfo(it.guid);
+    const perishable = Boolean(info?.freshness) || it.stacks.some((s) => s.freshness > 0);
+    const status = !original.has(it.guid) ? 'added' : original.get(it.guid) !== JSON.stringify(it.stacks) ? 'modified' : '';
+    return it.stacks.map((s, j) => `
+      <tr class="${status ? 'modified' : ''}">
+        <td class="key">${j === 0
+          ? `<span title="${escapeHtml(it.guid)}">${escapeHtml(itemName(it.guid))}</span>${status === 'added' ? ' <span class="count">new</span>' : ''}${info?.refrigerated ? ' <span class="tag" title="Needs refrigeration">❄</span>' : ''}`
+          : '<span class="subtle stack-sub">another stack</span>'}</td>
+        <td><input class="num inv-qty" type="number" min="1" step="1" value="${s.quantity}" data-item="${i}" data-stack="${j}" aria-label="Quantity"></td>
+        <td>${perishable
+          ? `<input class="num inv-fresh" type="number" min="0" step="1" value="${s.freshness}" data-item="${i}" data-stack="${j}" aria-label="Freshness" title="Freshness in 8-hour units${info?.freshness ? `, fully fresh = ${info.freshness}` : ''}"> <span class="subtle">${s.freshness ? freshnessLabel(s.freshness) : 'spoiled'}</span>`
+          : '<span class="subtle">doesn’t spoil</span>'}</td>
+        <td class="subtle">Day ${s.day}</td>
+        <td class="subtle">${formatCredits(s.price)}</td>
+        <td class="actions"><button class="link" data-remove-stack="${i}:${j}" title="Remove this stack">Remove</button></td>
+      </tr>`).join('');
+  }).join('');
+}
+
+function addInventoryItem() {
+  const label = $('#inv-add-search').value.trim();
+  const choice = ITEM_CHOICES.find((c) => c.label === label) ?? ITEM_CHOICES.find((c) => c.label.toLowerCase() === label.toLowerCase());
+  const qty = Number($('#inv-add-qty').value);
+  const hint = $('#inv-add-hint');
+  if (!choice) { hint.textContent = 'Pick an item from the suggestions.'; hint.classList.add('error-text'); return; }
+  if (!Number.isInteger(qty) || qty < 1 || qty > 100000) { hint.textContent = 'Quantity must be between 1 and 100,000.'; hint.classList.add('error-text'); return; }
+  const info = itemInfo(choice.guid);
+  const container = inventoryContainer(state.invKey);
+  const items = editableItems(state.invKey);
+  const stack = { price: 0, day: currentGameDay(state.current.save), quantity: qty, freshness: info?.freshness ?? 0 };
+  const existing = items.find((it) => it.guid === choice.guid);
+  if (existing) existing.stacks.push(stack);
+  else items.push({ guid: choice.guid, stacks: [stack] });
+  commitInventory(state.invKey);
+  renderTab();
+  const warn = info?.refrigerated && container.kind === 'venue' && container.storage !== 'refrigerated'
+    ? ` Note: ${choice.name} normally goes in a fridge.` : '';
+  toast(`Added ${qty} × ${choice.name}.${warn}`, warn ? 'error' : 'ok');
+}
+
+function makeAllFresh() {
+  const items = editableItems(state.invKey);
+  let n = 0;
+  for (const it of items) {
+    const max = itemInfo(it.guid)?.freshness;
+    if (!max) continue;
+    for (const s of it.stacks) if (s.freshness !== max) { s.freshness = max; n++; }
+  }
+  commitInventory(state.invKey);
+  renderTab();
+  toast(n ? `Refreshed ${n} stack${n === 1 ? '' : 's'}.` : 'Everything here is already fresh or doesn’t spoil.');
+}
+
 
 function overviewHtml() {
   const { entry, summary } = state.current;
@@ -345,7 +507,11 @@ async function saveChanges() {
   }
   let bytes;
   try {
-    bytes = applyEdits(save, { moneyCents: state.edits.moneyCents, variables: Object.fromEntries(state.edits.variables) });
+    bytes = applyEdits(save, {
+      moneyCents: state.edits.moneyCents,
+      variables: Object.fromEntries(state.edits.variables),
+      inventory: Object.fromEntries(state.edits.inventory),
+    });
   } catch (e) {
     await message(e.message, { title: 'Cannot apply changes', kind: 'error' });
     return;
@@ -381,6 +547,17 @@ document.addEventListener('click', async (e) => {
     renderPending(); renderTab();
   } else if (t.id === 'money-reset') { state.edits.moneyCents = undefined; renderPending(); renderTab(); }
   else if (t.dataset.revert) { state.edits.variables.delete(t.dataset.revert); renderPending(); renderVariableRows(); }
+  else if (t.id === 'inv-add') addInventoryItem();
+  else if (t.id === 'inv-fresh-all') makeAllFresh();
+  else if (t.id === 'inv-revert') { state.edits.inventory.delete(state.invKey); renderPending(); renderTab(); }
+  else if (t.dataset.removeStack) {
+    const [i, j] = t.dataset.removeStack.split(':').map(Number);
+    const items = editableItems(state.invKey);
+    items[i].stacks.splice(j, 1);
+    if (!items[i].stacks.length) items.splice(i, 1);
+    commitInventory(state.invKey);
+    renderTab();
+  }
   else if (t.dataset.take) {
     const d = state.compare.diff.variables.find((v) => v.name === t.dataset.take);
     setVariableEdit(d.name, d.before);
@@ -411,6 +588,17 @@ document.addEventListener('input', (e) => {
     $('#money-reset').disabled = state.edits.moneyCents === undefined;
     renderPending();
   } else if (t.id === 'var-search') { state.filters.q = t.value; renderVariableRows(); }
+  else if (t.matches('.inv-qty, .inv-fresh')) {
+    const isQty = t.classList.contains('inv-qty');
+    const v = Number(t.value);
+    const ok = /^\d+$/.test(t.value) && v <= INT32_MAX && (!isQty || v >= 1);
+    t.classList.toggle('invalid', !ok);
+    if (!ok) return;
+    const items = editableItems(state.invKey);
+    items[Number(t.dataset.item)].stacks[Number(t.dataset.stack)][isQty ? 'quantity' : 'freshness'] = v;
+    commitInventory(state.invKey);
+    t.closest('tr').classList.add('modified');
+  } else if (t.id === 'inv-add-search') { $('#inv-add-hint').classList.remove('error-text'); }
   else if (t.matches('input.num[data-var]')) {
     const ok = /^-?\d+$/.test(t.value) && Math.abs(Number(t.value)) <= INT32_MAX;
     t.classList.toggle('invalid', !ok);
@@ -427,6 +615,8 @@ document.addEventListener('change', (e) => {
   else if (t.id === 'var-kind') { state.filters.kind = t.value; renderVariableRows(); }
   else if (t.id === 'var-modified') { state.filters.modifiedOnly = t.checked; renderVariableRows(); }
   else if (t.id === 'compare-select') runCompare(t.value);
+  else if (t.id === 'inv-container') { state.invKey = t.value; renderTab(); }
+  else if (t.matches('.inv-qty, .inv-fresh')) renderTab();
   else if (t.matches('input[type=checkbox][data-var]')) { setVariableEdit(t.dataset.var, t.checked); renderVariableRows(); }
   else if (t.matches('input.num[data-var]')) renderVariableRows();
 });

@@ -5,6 +5,9 @@ Source code: https://github.com/HiveSolution/nivalis-save-editor
 WHAT IT DOES
   - Lists your saves with their screenshots, location, in-game day and playtime
   - Edit your money
+  - Edit inventories: your own, your venues' storage, fridges and furniture,
+    and vendor stock. Add any of 1,300+ items, change quantities and
+    freshness, or make all food fresh again
   - Browse, search and edit the game's story variables (relationship values,
     venue levels, quest flags and more)
   - Compare two saves to see what changed between them, and copy values over
@@ -30,6 +33,8 @@ GOOD TO KNOW
     break quest steps. Try changes on a copy of a save first if unsure.
   - The in-game clock cannot be edited (it is stored in hundreds of places).
   - Text variables are shown but cannot be edited yet.
+  - Added items are free and start fully fresh. Items that need a fridge are
+    marked, and you get a warning when adding them to normal storage.
   - Steam Cloud syncs your saves, so an edited save replaces the cloud copy.
   - Works with the current save format (version 151). If a game update changes
     the format, the editor refuses to open those saves instead of damaging them.
