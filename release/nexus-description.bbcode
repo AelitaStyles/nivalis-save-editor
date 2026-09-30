@@ -1,0 +1,48 @@
+[size=5][b]Nivalis Save Editor[/b][/size]
+A small, standalone savegame editor for [b]Nivalis Nights[/b] by RenokK. Unofficial, not affiliated with ION LANDS.
+
+[size=4][b]Features[/b][/size]
+[list]
+[*][b]Save browser[/b]: your saves with screenshots, location, in-game day and playtime, found automatically
+[*][b]Money[/b]: set any amount, or add 1,000 / 10,000 / 100,000 credits with one click
+[*][b]Story variables[/b]: browse, search and edit 1,800+ game variables (relationships, venue levels, quest flags, …)
+[*][b]Compare saves[/b]: see exactly what changed between two saves and copy values over
+[*][b]Automatic backups[/b] before every change, and every edit is double-checked before it is written
+[*][b]Safe by design[/b]: refuses to save while the game is running, and refuses to open saves from an unknown format version
+[/list]
+
+[size=4][b]Installation[/b][/size]
+[list=1]
+[*]Download and extract the zip anywhere.
+[*]Close Nivalis Nights.
+[*]Run [b]NivalisSaveEditor.exe[/b]. No installer, about 3 MB.
+[/list]
+
+[size=4][b]Usage[/b][/size]
+Pick a save, change what you like, click [b]Save changes[/b], then load that save in the game.
+Backups are stored in [i]SaveEditorBackups[/i] inside your save folder:
+[code]%USERPROFILE%\AppData\LocalLow\ION LANDS\Nivalis Nights[/code]
+
+[size=4][b]Good to know[/b][/size]
+[list]
+[*]Story variables drive quests and dialogue. Changing them can skip or break quest steps, so experiment on a copy of a save first.
+[*]The in-game clock and text variables are read-only for now.
+[*]Steam Cloud syncs your saves, so an edited save replaces the cloud copy.
+[*]The exe is not code-signed. If SmartScreen appears, click [i]More info → Run anyway[/i].
+[*]Requires Windows 10/11 with WebView2 (built into Windows 11).
+[/list]
+
+[size=4][b]Planned[/b][/size]
+[list]
+[*]Inventory editing with item names
+[*]Editing text variables
+[/list]
+
+[size=4][b]Compatibility[/b][/size]
+Tested with save format version 151. If a game update changes the save format, the editor will refuse to open those saves until it is updated.
+
+[size=4][b]License[/b][/size]
+Released under [url=https://creativecommons.org/licenses/by-nc/4.0/]CC BY-NC 4.0[/url]: free to share and modify for noncommercial purposes, as long as you credit RenokK. Selling this tool or using it in commercial products is not permitted.
+
+[size=4][b]Source code[/b][/size]
+Source code is available on [url=https://github.com/HiveSolution/nivalis-save-editor]GitHub[/url]. Bug reports and save-format findings are welcome there.

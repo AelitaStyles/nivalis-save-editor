@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nivalis Save Editor</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">N</span>
+        <span>Nivalis Save Editor</span>
+        <span class="version" id="app-version"></span>
+      </div>
+      <div class="folder">
+        <span class="folder-path" id="folder-path">No folder selected</span>
+        <button class="btn btn-ghost" id="choose-folder">Change folder…</button>
+      </div>
+    </header>
+
+    <div class="banner banner-warn" id="game-running" hidden>
+      Nivalis Nights is running. Close the game before saving, or it may overwrite your changes.
+    </div>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-title">Saves</div>
+        <ul class="save-list" id="save-list"></ul>
+      </aside>
+
+      <main class="main" id="main">
+        <div class="empty" id="empty">
+          <h2>Select a save</h2>
+          <p>Pick a save on the left to view and edit it.</p>
+        </div>
+      </main>
+    </div>
+
+    <footer class="pending" id="pending" hidden>
+      <span id="pending-text"></span>
+      <div class="pending-actions">
+        <button class="btn btn-ghost" id="discard">Discard</button>
+        <button class="btn btn-primary" id="save">Save changes</button>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
