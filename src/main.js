@@ -737,7 +737,7 @@ function backupsHtml() {
         <tbody>${rows || '<tr><td colspan="5" class="none">No backups of this save yet. One is made automatically every time you save changes.</td></tr>'}</tbody>
       </table>
     </div>
-    <p class="hint">Stored in <code title="${escapeHtml(state.backupFolder ?? '')}">%LOCALAPPDATA%\\Nivalis Save Editor\\Backups</code>, outside the Steam Cloud save folder.</p>
+    <p class="hint">Stored in <code>${escapeHtml(state.backupFolder ?? 'the app data folder')}</code>, outside the Steam Cloud save folder.</p>
     ${sel ? `
       <h2 class="section-title">Changes since the backup from ${formatDate(sel.backup.createdMs)}</h2>
       <div class="backup-compare">

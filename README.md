@@ -8,9 +8,9 @@ A small desktop editor for **Nivalis Nights** save files (`.sav`), built with Ta
 - **Inventory**: view and edit the items in your inventory, your venues' storage, fridges and furniture, and vendor stock; add any of 1,300+ items, change quantities and freshness
 - **Compare** two saves to see which variables a quest step changed, and copy values across
 - **People** and **Venues**: friendly editors for relationship levels and venue level/reviews; debt on the overview
-- **Backups**: up to 10 gzip-compressed backups per save in `%LOCALAPPDATA%\Nivalis Save Editor\Backups` (outside Steam Cloud), the first one kept permanently, with a per-backup comparison and one-click, undoable restore. Every edit is verified by re-reading the result before it is written
+- **Backups**: up to 10 gzip-compressed backups per save (Windows: `%LOCALAPPDATA%\Nivalis Save Editor\Backups`, Linux: `~/.local/share/nivalis-save-editor/backups`; outside Steam Cloud), the first one kept permanently, with a per-backup comparison and one-click, undoable restore. Every edit is verified by re-reading the result before it is written
 
-Saves live in `%USERPROFILE%\AppData\LocalLow\ION LANDS\Nivalis Nights\`. **Close the game before saving.** Steam Cloud syncs this folder, so the edited file becomes the synced version.
+Saves live in `%USERPROFILE%\AppData\LocalLow\ION LANDS\Nivalis Nights\` on Windows, and in the Proton prefix on Linux: `~/.local/share/Steam/steamapps/compatdata/1488490/pfx/drive_c/users/steamuser/AppData/LocalLow/ION LANDS/Nivalis Nights`. **Close the game before saving.** Steam Cloud syncs this folder, so the edited file becomes the synced version.
 
 Only save version **151** is supported; the editor refuses to open anything else rather than risk corrupting it.
 
@@ -24,15 +24,15 @@ Only save version **151** is supported; the editor refuses to open anything else
 
 ## Development
 
-Requirements: Node 20+, Rust (stable, MSVC toolchain), Visual Studio C++ build tools, WebView2 (built into Windows 10/11).
+Requirements: Node 20+, Rust (stable). On Windows: MSVC toolchain, Visual Studio C++ build tools, WebView2 (built into Windows 10/11). On Linux: WebKitGTK dev packages (e.g. `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`).
 
 ```sh
 npm install
 npm test              # parser tests against the sample saves in the parent folder (or NN_SAVE_DIR)
 npm run app:dev       # run the app with hot reload
-npm run app:portable  # release exe: src-tauri/target/release/nivalis-save-editor.exe
-npm run app:build     # NSIS installer in src-tauri/target/release/bundle/nsis/
-npm run release       # tests + portable build + release/out/NivalisSaveEditor-v<version>.zip
+npm run app:portable  # release binary: src-tauri/target/release/nivalis-save-editor(.exe)
+npm run app:build     # Windows: NSIS installer; Linux: AppImage
+npm run release       # tests + Windows: portable zip; Linux: AppImage
 ```
 
 CLI for inspection and scripted edits:

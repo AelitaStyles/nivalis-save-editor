@@ -44,18 +44,40 @@ fn existing_save(path: &str) -> Result<PathBuf, String> {
 
 
 
+fn saves_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        let profile = std::env::var_os("USERPROFILE")?;
+        Some(
+            PathBuf::from(profile)
+                .join("AppData")
+                .join("LocalLow")
+                .join("ION LANDS")
+                .join("Nivalis Nights"),
+        )
+    } else {
+        let home = std::env::var_os("HOME")?;
+        let candidates = [
+            PathBuf::from(&home).join(".local/share/Steam"),
+            PathBuf::from(&home).join(".steam/steam"),
+            PathBuf::from(&home).join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
+        ];
+        candidates
+            .iter()
+            .map(|steam| {
+                steam
+                    .join("steamapps/compatdata/1488490/pfx/drive_c/users/steamuser/AppData/LocalLow/ION LANDS/Nivalis Nights")
+            })
+            .find(|dir| dir.is_dir())
+    }
+}
+
 #[tauri::command]
 fn default_save_dir() -> Option<String> {
     // Development/screenshots: open a different folder instead of the game's.
     if let Some(dir) = std::env::var_os("NIVALIS_SAVE_DIR").filter(|d| Path::new(d).is_dir()) {
         return Some(dir.to_string_lossy().into_owned());
     }
-    let profile = std::env::var_os("USERPROFILE")?;
-    let dir = PathBuf::from(profile)
-        .join("AppData")
-        .join("LocalLow")
-        .join("ION LANDS")
-        .join("Nivalis Nights");
+    let dir = saves_dir()?;
     dir.is_dir().then(|| dir.to_string_lossy().into_owned())
 }
 
