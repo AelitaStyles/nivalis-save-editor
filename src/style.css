@@ -467,7 +467,7 @@ table.inv td.key { font-family: inherit; font-size: 14px; }
 /* ---------- people, venues, finances ---------- */
 
 .num.small { width: 84px; }
-input.num.modified { border-color: var(--modified-border); background: var(--modified); }
+input.num.modified, select.modified { border-color: var(--modified-border); background: var(--modified); }
 .switch.modified span { box-shadow: 0 0 0 2px var(--modified-border); }
 table.people td { font-family: inherit; }
 table.people th .subtle { font-weight: 400; }

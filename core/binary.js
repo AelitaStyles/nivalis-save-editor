@@ -20,6 +20,10 @@ export function readFloat32(bytes, pos) {
   return view(bytes).getFloat32(pos, true);
 }
 
+export function writeFloat32(bytes, pos, value) {
+  view(bytes).setFloat32(pos, value, true);
+}
+
 // 7-bit encoded length prefix followed by UTF-8 bytes (System.IO.BinaryWriter.Write(string)).
 export function readString(bytes, pos) {
   let length = 0;

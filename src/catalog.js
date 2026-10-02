@@ -49,6 +49,16 @@ export function venueName(id) {
   return v.key ? `${titleCase(v.key.replace(/^VENUE_/, '').replace(/_/g, ' '))} (${place})` : place;
 }
 
+// { name, steps }: steps[level] is the XP that level costs (see core/skills.js).
+export function skillInfo(guid) {
+  return data.skills[guid] ?? null;
+}
+
+export function skillName(guid) {
+  const s = data.skills[guid];
+  return s ? prettify(s.name.replace(/^Player_/, '')) : `Unknown skill (${guid.slice(0, 8)})`;
+}
+
 export function vendorName(id) {
   const n = data.vendors[id];
   return n ? prettify(n) : null;

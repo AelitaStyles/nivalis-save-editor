@@ -4,6 +4,7 @@ A small desktop editor for **Nivalis Nights** save files (`.sav`), built with Ta
 
 - Browse your saves with their screenshots, location, in-game day and playtime
 - Edit **money**
+- **Skills**: set the level of each skill you have started (Barter, Boat, Cooking, Farming, Fishing, Serving, Managing)
 - Browse, search and edit the game's **1,800+ story variables** (flags and numbers: relationships, venue levels, quest steps, …)
 - **Inventory**: view and edit the items in your inventory, your venues' storage, fridges and furniture, and vendor stock; add any of 1,300+ items, change quantities and freshness
 - **Compare** two saves to see which variables a quest step changed, and copy values across
@@ -50,7 +51,8 @@ npm run cli -- info  <save.sav>
 npm run cli -- vars  <save.sav> [filter]
 npm run cli -- diff  <old.sav> <new.sav>
 npm run cli -- check <save.sav>...
-npm run cli -- edit  <save.sav> --money 2500.00 --set GameState.Debt=0 -o out.sav
+npm run cli -- skills <save.sav>
+npm run cli -- edit  <save.sav> --money 2500.00 --set GameState.Debt=0 --skill Boat=3 -o out.sav
 ```
 
 ## Layout
@@ -108,7 +110,9 @@ Layout: `int32 count`, then for each entry `string name, int32 type, value`. Int
 
 Freshness is counted in 8-hour units and drops at 00:00, 08:00 and 16:00; 0 means the item doesn't spoil. Inventory edits change the file size, so the editor re-encodes the section and shifts every later Ghost block end offset.
 
-**Item names.** Item GUIDs are the ids of item definitions in the game's asset files. `scripts/build-item-catalog.mjs` extracts names, base prices, freshness and refrigeration flags, plus vendor and venue names, into `src/data/items.json`:
+**Skills** (section key `2F00F72D-896A-42F8-92C4-E775FB79970E`). `int32 count`, then per skill `string skillGuid, float xp, int32 level`. A skill gets an entry once the player has gained XP in it. XP is cumulative; each skill definition in the game assets lists the XP every level costs (Boat: 2000, 5000, 10000, …, so level 2 starts at 7000), and the stored level always matches the XP. Stored levels start at 0, while the game shows them starting at 1; the editor and the CLI use the game's numbering. The game has been seen to store `NaN` as the XP of a skill at its top level. The section after it (`55F0A877-…`) holds achievement counters.
+
+**Item names.** Item GUIDs are the ids of item definitions in the game's asset files. `scripts/build-item-catalog.mjs` extracts names, base prices, freshness and refrigeration flags, plus vendor and venue names and the skill level tables, into `src/data/items.json`:
 
 ```sh
 node scripts/build-item-catalog.mjs "C:/Program Files (x86)/Steam/steamapps/common/Nivalis Nights"
