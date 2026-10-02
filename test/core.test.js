@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   parseSave, applyEdits, roundTripCheck, diffSaves, listVariables, summarize,
-  UnsupportedEditError, SaveFormatError, formatCredits, currentGameDay,
+  UnsupportedEditError, SaveFormatError, formatCredits, currentGameDay, TESTED_VERSIONS,
 } from '../core/index.js';
 import { encodeString, readString } from '../core/binary.js';
 
@@ -35,6 +35,37 @@ test('rejects non-save input', () => {
 
 test('sample saves are present', { skip: saveFiles.length === 0 && 'no sample saves found' }, () => {
   assert.ok(saveFiles.length > 0);
+});
+
+test('opens untested save versions, flags them and can still edit them', { skip: saveFiles.length === 0 && 'no sample saves found' }, () => {
+  const bytes = new Uint8Array(readFileSync(join(saveDir, saveFiles[0])));
+  for (const version of TESTED_VERSIONS) {
+    bytes[0] = version;
+    assert.equal(parseSave(bytes).header.versionTested, true);
+  }
+  for (const version of [150, 152, 154]) {
+    bytes[0] = version;
+    const save = parseSave(bytes);
+    assert.equal(save.header.version, version);
+    assert.equal(summarize(save).versionTested, false);
+    assert.deepEqual(save.warnings, []);
+    const edited = parseSave(applyEdits(save, { moneyCents: save.header.moneyCents + 1 }));
+    assert.equal(edited.header.version, version);
+    assert.equal(edited.playerMoney.value, save.header.moneyCents + 1);
+  }
+  bytes[0] = 0;
+  assert.throws(() => parseSave(bytes), SaveFormatError);
+});
+
+test('a layout change is refused whatever the version says', { skip: saveFiles.length === 0 && 'no sample saves found' }, () => {
+  const save = load(saveFiles[0]);
+  // one extra byte in front of the inventory section, as a new field would add
+  const at = save.inventory.start;
+  const shifted = new Uint8Array(save.bytes.length + 1);
+  shifted.set(save.bytes.subarray(0, at), 0);
+  shifted.set(save.bytes.subarray(at), at + 1);
+  shifted[0] = 154;
+  assert.throws(() => parseSave(shifted), SaveFormatError);
 });
 
 for (const file of saveFiles) {

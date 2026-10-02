@@ -45,6 +45,7 @@ function main(argv) {
   switch (cmd) {
     case 'info': {
       const s = summarize(load(args[0]));
+      console.log(`Save version  ${s.version}${s.versionTested ? '' : ' (untested)'}`);
       console.log(`Saved at      ${s.savedAt}`);
       console.log(`Scene index   ${s.sceneIndex}`);
       console.log(`Playtime      ${(s.playtimeSeconds / 3600).toFixed(2)} h`);
@@ -88,7 +89,8 @@ ${c.key} (${c.kind}${c.storage ? `, ${c.storage}` : ''}, ${c.items.length} items
         try {
           const save = load(path);
           const problems = [...save.warnings, ...roundTripCheck(save)];
-          console.log(`${problems.length ? 'FAIL' : 'OK  '} ${path}${problems.length ? `\n     ${problems.join('\n     ')}` : ''}`);
+          const untested = save.header.versionTested ? '' : ` (untested version ${save.header.version})`;
+          console.log(`${problems.length ? 'FAIL' : 'OK  '} ${path}${untested}${problems.length ? `\n     ${problems.join('\n     ')}` : ''}`);
           if (problems.length) failed++;
         } catch (e) {
           console.log(`FAIL ${path}\n     ${e.message}`);
@@ -116,6 +118,7 @@ ${c.key} (${c.kind}${c.storage ? `, ${c.storage}` : ''}, ${c.items.length} items
       }
       if (!out && !inPlace) throw new Error('Specify -o <out.sav> or --in-place');
       const save = load(path);
+      if (!save.header.versionTested) console.log(`WARNING: save version ${save.header.version} is untested; the game may not load the edited save correctly`);
       if (addItems.length) {
         edits.inventory = {};
         for (const spec of addItems) {

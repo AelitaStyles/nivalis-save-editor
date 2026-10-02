@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open, ask, message } from '@tauri-apps/plugin-dialog';
 import {
-  parseSave, summarize, listVariables, diffSaves, applyEdits, formatCredits, currentGameDay, INT32_MAX,
+  parseSave, summarize, listVariables, diffSaves, applyEdits, formatCredits, currentGameDay, INT32_MAX, TESTED_VERSIONS,
 } from '../core/index.js';
 import { areaName } from './areas.js';
 import {
@@ -183,6 +183,7 @@ function renderMain() {
       </div>
       <nav class="tabs">${tabs.map(([id, label]) => `<button class="tab ${state.tab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}</nav>
     </div>
+    ${summary.versionTested ? '' : `<div class="banner banner-warn inline">This save uses format version ${summary.version}, which is newer or older than the versions this editor was tested with (${TESTED_VERSIONS.join(', ')}). It opened without problems, but edits might not work as expected in the game. Check for an editor update; every change is backed up first.</div>`}
     ${summary.warnings.length ? `<div class="banner banner-warn inline">${summary.warnings.map(escapeHtml).join('<br>')}</div>` : ''}
     <div class="tab-body" id="tab-body"></div>`;
   renderTab();
@@ -852,7 +853,8 @@ async function saveChanges() {
     return;
   }
   const note = summarizeDiff(diffSaves(save, parseSave(bytes)));
-  const ok = await ask(`Write ${pendingCount()} change(s) to ${entry.name}.sav?\n\nThe current file is backed up first; you can restore it from the Backups tab.`, { title: 'Save changes', kind: 'info' });
+  const untested = save.header.versionTested ? '' : `\n\nThis save uses format version ${save.header.version}, which this editor has not been tested with. The game may not load the edited save correctly.`;
+  const ok = await ask(`Write ${pendingCount()} change(s) to ${entry.name}.sav?${untested}\n\nThe current file is backed up first; you can restore it from the Backups tab.`, { title: 'Save changes', kind: untested ? 'warning' : 'info' });
   if (!ok) return;
   try {
     await invoke('write_save', bytes, { headers: { 'x-save-path': encodeURIComponent(entry.path), 'x-backup-note': encodeURIComponent(note) } });

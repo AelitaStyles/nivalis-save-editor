@@ -1,4 +1,4 @@
-// Parser/editor for Nivalis Nights .sav files (save version 151).
+// Parser/editor for Nivalis Nights .sav files (tested with save versions 151 and 153).
 //
 // Layout knowledge (reverse-engineered, see README):
 //   header        version, scene, playtime, unix time, in-game seconds, money (cents), GUID list, ..., "END_HEADER"
@@ -20,7 +20,10 @@ import { parseInventory, encodeInventoryBody, validateInventoryItems } from './i
 
 export { SaveFormatError, UnsupportedEditError };
 
-export const SUPPORTED_VERSION = 151;
+// Versions checked against real saves. 153 (game patch of 2026-10-01) has the same layout as 151; it
+// only adds and drops a few variables. Other versions are still opened: the structural checks in
+// parseSave decide whether the layout is understood, and header.versionTested lets the UI warn.
+export const TESTED_VERSIONS = [151, 153];
 export const INT32_MAX = 2147483647;
 
 export const VARIABLE_TABLES = [
@@ -35,9 +38,7 @@ const END_HEADER = asciiBytes('END_HEADER');
 function parseHeader(bytes) {
   if (bytes.length < 32) throw new SaveFormatError('File is too small to be a Nivalis Nights save');
   const version = readInt32(bytes, 0);
-  if (version !== SUPPORTED_VERSION) {
-    throw new SaveFormatError(`Unsupported save version ${version} (this editor supports ${SUPPORTED_VERSION})`);
-  }
+  if (version < 1 || version > 100000) throw new SaveFormatError('This is not a Nivalis Nights save');
   let pos = 24;
   const guidCount = readInt32(bytes, pos);
   pos += 4;
@@ -52,6 +53,7 @@ function parseHeader(bytes) {
   if (endHeader < 0 || endHeader > 64 * 1024) throw new SaveFormatError('END_HEADER marker not found');
   return {
     version,
+    versionTested: TESTED_VERSIONS.includes(version),
     sceneIndex: readInt32(bytes, 4),
     playtimeSeconds: readFloat32(bytes, 8),
     savedAt: new Date(readInt32(bytes, 12) * 1000),
@@ -180,6 +182,7 @@ export function summarize(save) {
   const { header } = save;
   return {
     version: header.version,
+    versionTested: header.versionTested,
     sceneIndex: header.sceneIndex,
     playtimeSeconds: header.playtimeSeconds,
     savedAt: header.savedAt.toISOString(),
