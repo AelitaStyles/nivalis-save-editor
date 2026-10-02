@@ -45,8 +45,11 @@ GOOD TO KNOW
   - Added items are free and start fully fresh. Items that need a fridge are
     marked, and you get a warning when adding them to normal storage.
   - Steam Cloud syncs your saves, so an edited save replaces the cloud copy.
-  - Works with the current save format (version 151). If a game update changes
-    the format, the editor refuses to open those saves instead of damaging them.
+  - Tested with save format versions 151 and 153 (the game patch of 1 October
+    2026). After a later game update the editor still opens your saves but
+    warns you that the version is untested; look for an editor update then.
+    If an update changes the format so much that the editor can't read a
+    save, it refuses to open it instead of damaging it.
 
 REQUIREMENTS
 {{REQUIREMENTS}}

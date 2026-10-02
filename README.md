@@ -12,7 +12,7 @@ A small desktop editor for **Nivalis Nights** save files (`.sav`), built with Ta
 
 Saves live in `%USERPROFILE%\AppData\LocalLow\ION LANDS\Nivalis Nights\` on Windows, and in the Proton prefix on Linux: `~/.local/share/Steam/steamapps/compatdata/1488490/pfx/drive_c/users/steamuser/AppData/LocalLow/ION LANDS/Nivalis Nights`. **Close the game before saving.** Steam Cloud syncs this folder, so the edited file becomes the synced version.
 
-Only save version **151** is supported; the editor refuses to open anything else rather than risk corrupting it.
+Tested with save versions **151** and **153** (the game patch of 1 October 2026). Saves of any other version still open if their layout checks out, with a warning in the save view and again before writing; a save whose layout the editor doesn't understand is refused, whatever its version.
 
 ## Screenshots
 
@@ -55,15 +55,17 @@ npm run cli -- edit  <save.sav> --money 2500.00 --set GameState.Debt=0 -o out.sa
 | `src/` | Web UI (vanilla JS + Vite) |
 | `src-tauri/` | Rust shell: locate saves, read files, backup + atomic write, game-running check |
 
-## Save format notes (version 151)
+## Save format notes (versions 151 and 153)
 
 Reverse-engineered; the game is an IL2CPP Unity build with a custom `BinaryWriter`-style serializer. Little-endian; strings are 7-bit-length-prefixed UTF-8. No compression, encryption or checksum found.
+
+Version 153 has the same layout as 151. A 151 save loaded and re-saved by the patched game keeps its sections and inventory grammar; the story variables gain `Chess.NextTryDay` and five `GlobalInventory*` counters and lose `Venue_NoodleBar.HasAllIngredients`.
 
 **Header**
 
 | Offset | Type | Meaning |
 |---|---|---|
-| 0 | int32 | Save version (151) |
+| 0 | int32 | Save version (151 or 153) |
 | 4 | int32 | Scene/area index (e.g. 2 = Meridian Market) |
 | 8 | float | Playtime in seconds |
 | 12 | int32 | Unix timestamp of the save |
@@ -103,6 +105,8 @@ Freshness is counted in 8-hour units and drops at 00:00, 08:00 and 16:00; 0 mean
 ```sh
 node scripts/build-item-catalog.mjs "C:/Program Files (x86)/Steam/steamapps/common/Nivalis Nights"
 ```
+
+Re-run it after every game update. Updates renumber the script ids the item, dish and vendor definitions are recognised by; the script finds the new ids through the GUIDs already in `items.json` and stops without writing if it cannot read the definitions.
 
 **Not decoded yet.** Text variable edits (size-changing, like inventories) and the player position (floats at the end of the file).
 
