@@ -20,6 +20,6 @@
     <category>Utility</category>
   </categories>
   <releases>
-    <release version="{{VERSION}}" date="2026-10-01"/>
+    <release version="{{VERSION}}" date="{{DATE}}"/>
   </releases>
 </component>

@@ -4,7 +4,7 @@
 fn main() {
     // WebKitGTK crashes with "Error 71 (Protocol error)" on some Wayland compositors;
     // default to XWayland on Linux unless the user chose a backend themselves.
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
         if std::env::var_os("GDK_BACKEND").is_none() {
             std::env::set_var("GDK_BACKEND", "x11");

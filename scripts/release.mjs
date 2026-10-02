@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, statSync,
 import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { releaseReadme } from './release-readme.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -25,15 +26,7 @@ if (process.platform === 'win32') {
   rmSync(stage, { recursive: true, force: true });
   mkdirSync(stage, { recursive: true });
   copyFileSync(join(root, 'src-tauri', 'target', 'release', 'nivalis-save-editor.exe'), join(stage, 'NivalisSaveEditor.exe'));
-  const readme = readFileSync(join(root, 'release', 'README.txt'), 'utf8')
-    .replaceAll('{{VERSION}}', version)
-    .replaceAll('{{BINARY}}', 'NivalisSaveEditor.exe')
-    .replaceAll('{{SAVES_DIR}}', '%USERPROFILE%\\AppData\\LocalLow\\ION LANDS\\Nivalis Nights')
-    .replaceAll('{{BACKUP_DIR}}', '%LOCALAPPDATA%\\Nivalis Save Editor\\Backups')
-    .replaceAll('{{REQUIREMENTS}}', 'Windows 10 or 11 with Microsoft Edge WebView2 (included in Windows 11 and\nmost up-to-date Windows 10 PCs). If the window stays blank, install the\n"Evergreen WebView2 Runtime" from Microsoft.')
-    .replaceAll('{{PLATFORM_NOTE}}', 'WINDOWS SMARTSCREEN\nThe exe is not code-signed, so Windows may show "Windows protected your PC".\nClick "More info" -> "Run anyway".')
-    .replace(/\r?\n/g, '\r\n');
-  writeFileSync(join(stage, 'README.txt'), readme);
+  writeFileSync(join(stage, 'README.txt'), releaseReadme(root, version));
   // Ship the license text and copyright notice with every copy (CC BY-NC 4.0 attribution).
   writeFileSync(join(stage, 'LICENSE.txt'), readFileSync(join(root, 'LICENSE.txt'), 'utf8').replace(/\r?\n/g, '\r\n'));
 
@@ -44,7 +37,7 @@ if (process.platform === 'win32') {
   execFileSync(tar, ['-a', '-c', '-f', artifact, '-C', outDir, name], { stdio: 'inherit' });
 } else {
   run('npx tauri build');
-  // Add AppStream metadata (name/icon/version) to the AppImage.
+  // Add AppStream metadata (name/icon/version), the license and the README to the AppImage.
   run('node scripts/add-appstream.mjs');
   const bundleDir = join(root, 'src-tauri', 'target', 'release', 'bundle', 'appimage');
   const built = readdirSync(bundleDir).filter((f) => f.endsWith('.AppImage')).map((f) => join(bundleDir, f)).sort().pop();

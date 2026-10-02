@@ -1,14 +1,16 @@
 // Injects AppStream metadata into the AppImage so AppImage managers
 // can show the correct name, icon and version. Tauri's bundler does not
-// support metainfo directly, so we repack with appimagetool.
+// support metainfo directly, so we repack with appimagetool. The license
+// and the release README go in as well (usr/share/doc/nivalis-save-editor).
 //
 //   node scripts/add-appstream.mjs [path-to.AppImage]
 //
 // Requires an appimagetool AppImage extracted at tools/appimagetool (see README).
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { releaseReadme } from './release-readme.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -30,8 +32,14 @@ const appDir = join(outDir, 'squashfs-root');
 const metainfoDir = join(appDir, 'usr', 'share', 'metainfo');
 mkdirSync(metainfoDir, { recursive: true });
 const metainfo = readFileSync(join(root, 'src-tauri', 'com.renokk.nivalis-save-editor.appdata.xml'), 'utf8')
-  .replaceAll('{{VERSION}}', version);
+  .replaceAll('{{VERSION}}', version)
+  .replaceAll('{{DATE}}', new Date().toISOString().slice(0, 10));
 writeFileSync(join(metainfoDir, 'com.renokk.nivalis-save-editor.appdata.xml'), metainfo);
+// Ship the license text and copyright notice with every copy (CC BY-NC 4.0 attribution).
+const docDir = join(appDir, 'usr', 'share', 'doc', 'nivalis-save-editor');
+mkdirSync(docDir, { recursive: true });
+copyFileSync(join(root, 'LICENSE.txt'), join(docDir, 'LICENSE.txt'));
+writeFileSync(join(docDir, 'README.txt'), releaseReadme(root, version, 'linux'));
 // The Tauri-generated desktop file is "Nivalis Save Editor.desktop"; rename it so it
 // matches the <launchable> id and AppStream validation accepts the pair.
 const appDirRoot = appDir;
