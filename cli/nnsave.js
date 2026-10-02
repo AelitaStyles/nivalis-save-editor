@@ -2,11 +2,22 @@
 // Command-line companion to the editor, mainly for development and verification.
 import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import {
-  parseSave, summarize, listVariables, diffSaves, applyEdits, roundTripCheck, formatCredits, currentGameDay,
+  parseSave, summarize, listVariables, diffSaves, applyEdits, roundTripCheck, formatCredits, currentGameDay, xpForLevel,
 } from '../core/index.js';
 
-const { items: CATALOG } = JSON.parse(readFileSync(new URL('../src/data/items.json', import.meta.url), 'utf8'));
+const { items: CATALOG, skills: SKILLS } = JSON.parse(readFileSync(new URL('../src/data/items.json', import.meta.url), 'utf8'));
 const itemName = (guid) => CATALOG[guid]?.name ?? `Unknown item ${guid}`;
+
+// Skill levels are stored from 0 but shown from 1 in the game; the CLI speaks the game's numbers.
+const shownLevel = (stored) => (stored === undefined ? undefined : stored + 1);
+const skillName = (guid) => SKILLS[guid]?.name ?? `Unknown skill ${guid}`;
+
+function findSkill(query) {
+  if (SKILLS[query]) return query;
+  const match = Object.entries(SKILLS).find(([, s]) => s.name.toLowerCase() === query.toLowerCase());
+  if (!match) throw new Error(`Unknown skill "${query}" (known: ${Object.values(SKILLS).map((s) => s.name).join(', ')})`);
+  return match[0];
+}
 
 function findItem(query) {
   if (CATALOG[query]) return query;
@@ -21,7 +32,9 @@ const USAGE = `Usage:
   nnsave diff <old.sav> <new.sav>
   nnsave check <file.sav>...
   nnsave inv <file.sav> [container]
+  nnsave skills <file.sav>
   nnsave edit <file.sav> [--money <credits>] [--set Name.Var=value]... [--add-item <container>:<item>:<qty>]...
+              [--skill <name>=<level>]...
               (-o <out.sav> | --in-place)`;
 
 const load = (path) => parseSave(new Uint8Array(readFileSync(path)));
@@ -76,9 +89,18 @@ ${c.key} (${c.kind}${c.storage ? `, ${c.storage}` : ''}, ${c.items.length} items
       }
       return 0;
     }
+    case 'skills': {
+      for (const e of load(args[0]).skills.entries) {
+        const steps = SKILLS[e.guid]?.steps;
+        const next = steps && e.level < steps.length - 1 ? `, next level at ${xpForLevel(steps, e.level + 1)}` : ', top level';
+        console.log(`${skillName(e.guid).padEnd(18)} level ${String(shownLevel(e.level)).padEnd(3)} xp ${e.xp}${steps ? next : ''}`);
+      }
+      return 0;
+    }
     case 'diff': {
       const d = diffSaves(load(args[0]), load(args[1]));
       for (const h of d.header) console.log(`[header] ${h.field}: ${h.before} -> ${h.after}`);
+      for (const s of d.skills) console.log(`[skill] ${skillName(s.guid)}: level ${shownLevel(s.before?.level)} xp ${s.before?.xp} -> level ${shownLevel(s.after?.level)} xp ${s.after?.xp}`);
       for (const v of d.variables) console.log(`${v.name}: ${show(v.before)} -> ${show(v.after)}`);
       console.log(`${d.variables.length} variable(s) changed`);
       return 0;
@@ -103,6 +125,7 @@ ${c.key} (${c.kind}${c.storage ? `, ${c.storage}` : ''}, ${c.items.length} items
       const [path, ...rest] = args;
       const edits = { variables: {} };
       const addItems = [];
+      const skillLevels = [];
       let out;
       let inPlace = false;
       for (let i = 0; i < rest.length; i++) {
@@ -112,6 +135,7 @@ ${c.key} (${c.kind}${c.storage ? `, ${c.storage}` : ''}, ${c.items.length} items
           const [name, raw] = rest[++i].split('=');
           edits.variables[name] = parseValue(raw);
         } else if (a === '--add-item') addItems.push(rest[++i]);
+        else if (a === '--skill') skillLevels.push(rest[++i]);
         else if (a === '-o') out = rest[++i];
         else if (a === '--in-place') inPlace = true;
         else throw new Error(`Unknown option ${a}`);
@@ -119,6 +143,14 @@ ${c.key} (${c.kind}${c.storage ? `, ${c.storage}` : ''}, ${c.items.length} items
       if (!out && !inPlace) throw new Error('Specify -o <out.sav> or --in-place');
       const save = load(path);
       if (!save.header.versionTested) console.log(`WARNING: save version ${save.header.version} is untested; the game may not load the edited save correctly`);
+      for (const spec of skillLevels) {
+        const [query, raw] = spec.split('=');
+        const guid = findSkill(query);
+        const level = Number(raw) - 1;
+        const { steps } = SKILLS[guid];
+        if (!Number.isInteger(level) || level < 0 || level >= steps.length) throw new Error(`${SKILLS[guid].name} level must be 1 to ${steps.length}`);
+        (edits.skills ??= {})[guid] = { xp: xpForLevel(steps, level), level };
+      }
       if (addItems.length) {
         edits.inventory = {};
         for (const spec of addItems) {

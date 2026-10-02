@@ -2,11 +2,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open, ask, message } from '@tauri-apps/plugin-dialog';
 import {
-  parseSave, summarize, listVariables, diffSaves, applyEdits, formatCredits, currentGameDay, INT32_MAX, TESTED_VERSIONS,
+  parseSave, summarize, listVariables, diffSaves, applyEdits, formatCredits, currentGameDay, xpForLevel, INT32_MAX, TESTED_VERSIONS,
 } from '../core/index.js';
 import { areaName } from './areas.js';
 import {
-  itemInfo, itemName, ITEM_CHOICES, venueInfo, venueName, vendorName, prettify,
+  itemInfo, itemName, ITEM_CHOICES, venueInfo, venueName, vendorName, skillInfo, skillName, prettify,
 } from './catalog.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -16,7 +16,7 @@ const state = {
   saves: [],
   thumbs: new Map(), // path -> blob URL
   current: null, // { entry, save, summary, vars, varIndex }
-  edits: { moneyCents: undefined, variables: new Map(), inventory: new Map() },
+  edits: null, // set by resetEdits()
   tab: 'overview',
   invKey: 'PLAYER_INVENTORY',
   peopleFilters: { q: '', metOnly: true },
@@ -69,12 +69,13 @@ function toast(text, kind = 'ok') {
 }
 
 function pendingCount() {
-  return (state.edits.moneyCents !== undefined ? 1 : 0) + state.edits.variables.size + state.edits.inventory.size;
+  return (state.edits.moneyCents !== undefined ? 1 : 0) + state.edits.variables.size + state.edits.inventory.size + state.edits.skills.size;
 }
 
 function resetEdits() {
-  state.edits = { moneyCents: undefined, variables: new Map(), inventory: new Map() };
+  state.edits = { moneyCents: undefined, variables: new Map(), inventory: new Map(), skills: new Map() };
 }
+resetEdits();
 
 function currentValue(v) {
   return state.edits.variables.has(v.name) ? state.edits.variables.get(v.name) : v.value;
@@ -392,6 +393,7 @@ function overviewHtml() {
       <p class="hint" id="money-hint">Original: ${formatCredits(summary.moneyCents)} credits. Both copies in the save are updated.</p>
     </section>
     ${financesHtml()}
+    ${skillsHtml()}
     <section class="card muted-card">
       <h2>In-game time</h2>
       <p class="hint">Read-only. The clock is stamped into hundreds of world records (schedules, events), so changing it in one place would desync the world.</p>
@@ -627,6 +629,43 @@ function financesHtml() {
     </section>`;
 }
 
+const shownLevel = (stored) => stored + 1;
+const formatXp = (xp) => (Number.isNaN(xp) ? '–' : Math.floor(xp).toLocaleString());
+
+// Skills the save has an entry for. Choosing a level also moves the XP to the start of that level,
+// so the two stay consistent the way the game keeps them. Levels are stored from 0; the game (and
+// therefore everything shown here) counts them from 1.
+function skillsHtml() {
+  const { entries } = state.current.save.skills;
+  if (!entries.length) return '';
+  const fields = entries.map((e) => {
+    const info = skillInfo(e.guid);
+    const edit = state.edits.skills.get(e.guid);
+    const { xp, level } = edit ?? e;
+    const top = Math.max(info ? info.steps.length - 1 : 0, e.level);
+    const options = Array.from({ length: top + 1 }, (_, l) => `<option value="${l}" ${l === level ? 'selected' : ''}>Level ${shownLevel(l)}</option>`).join('');
+    const progress = info && level < info.steps.length - 1
+      ? `${formatXp(xp)} / ${xpForLevel(info.steps, level + 1).toLocaleString()} XP`
+      : 'Top level';
+    return `<label class="field"><span>${escapeHtml(skillName(e.guid))}</span>
+      <select data-skill="${e.guid}" class="${edit ? 'modified' : ''}" ${info ? '' : 'disabled'}>${options}</select>
+      <span class="subtle">${progress}</span></label>`;
+  }).join('');
+  return `
+    <section class="card">
+      <h2>Skills</h2>
+      <div class="venue-grid">${fields}</div>
+      <p class="hint">Choosing a level sets the skill’s XP to the start of that level. A skill appears here once you have gained XP in it in the game.</p>
+    </section>`;
+}
+
+function setSkillLevel(guid, level) {
+  const original = state.current.save.skills.entries.find((e) => e.guid === guid);
+  if (level === original.level) state.edits.skills.delete(guid);
+  else state.edits.skills.set(guid, { xp: xpForLevel(skillInfo(guid).steps, level), level });
+  renderPending();
+  renderTab();
+}
 
 // ---------- diffs (shared by Compare and Backups) ----------
 
@@ -650,7 +689,13 @@ function containerLabel(key) {
 
 // Cards listing header, inventory and variable differences. beforeLabel/afterLabel name the columns.
 function diffHtml(diff, beforeLabel, afterLabel, { allowTake = false } = {}) {
-  const { header, variables, inventory } = diff;
+  const { header, variables, inventory, skills } = diff;
+  const skillValue = (s) => (s ? `Level ${shownLevel(s.level)} (${formatXp(s.xp)} XP)` : 'Not started');
+  const skillsCard = skills.length ? `
+    <div class="card">
+      <h2>Skills <span class="count">${skills.length}</span></h2>
+      <table class="diff"><tbody>${skills.map((s) => `<tr><td>${escapeHtml(skillName(s.guid))}</td><td class="before">${skillValue(s.before)}</td><td>→</td><td class="after">${skillValue(s.after)}</td></tr>`).join('')}</tbody></table>
+    </div>` : '';
   const headerCard = `
     <div class="card">
       <h2>Save info</h2>
@@ -678,13 +723,16 @@ function diffHtml(diff, beforeLabel, afterLabel, { allowTake = false } = {}) {
           <td class="actions">${allowTake && v.kind !== 'string' && v.before !== undefined ? `<button class="link" data-take="${escapeHtml(v.name)}" title="Stage the other save's value as an edit">Use other value</button>` : ''}</td>
         </tr>`).join('')}</tbody></table></div>` : '<p class="hint">No differences.</p>'}
     </div>`;
-  return headerCard + inventoryCard + variablesCard;
+  return headerCard + skillsCard + inventoryCard + variablesCard;
 }
 
 // One-line description of an edit, stored with the backup taken before it.
 function summarizeDiff(diff) {
   const parts = [];
   for (const h of diff.header) parts.push(`${HEADER_LABELS[h.field]} ${formatHeaderValue(h.field, h.before)} → ${formatHeaderValue(h.field, h.after)}`);
+  for (const s of diff.skills) {
+    if (s.before?.level !== s.after?.level) parts.push(`${skillName(s.guid)} level ${shownLevel(s.before?.level ?? 0)} → ${shownLevel(s.after?.level ?? 0)}`);
+  }
   const inv = diff.inventory.filter((c) => c.before !== c.after);
   for (const c of inv.slice(0, 3)) {
     const d = c.after - c.before;
@@ -847,6 +895,7 @@ async function saveChanges() {
       moneyCents: state.edits.moneyCents,
       variables: Object.fromEntries(state.edits.variables),
       inventory: Object.fromEntries(state.edits.inventory),
+      skills: Object.fromEntries(state.edits.skills),
     });
   } catch (e) {
     await message(e.message, { title: 'Cannot apply changes', kind: 'error' });
@@ -956,6 +1005,7 @@ document.addEventListener('change', (e) => {
   else if (t.id === 'var-modified') { state.filters.modifiedOnly = t.checked; renderVariableRows(); }
   else if (t.id === 'compare-select') runCompare(t.value);
   else if (t.id === 'inv-container') { state.invKey = t.value; renderTab(); }
+  else if (t.dataset.skill) setSkillLevel(t.dataset.skill, Number(t.value));
   else if (t.matches('.inv-qty, .inv-fresh')) renderTab();
   else if (t.matches('input[type=checkbox][data-var]')) { setVariableEdit(t.dataset.var, t.checked); refreshAfterVarEdit(); }
   else if (t.matches('input.num[data-var]')) refreshAfterVarEdit();

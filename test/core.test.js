@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   parseSave, applyEdits, roundTripCheck, diffSaves, listVariables, summarize,
-  UnsupportedEditError, SaveFormatError, formatCredits, currentGameDay, TESTED_VERSIONS,
+  UnsupportedEditError, SaveFormatError, formatCredits, currentGameDay, TESTED_VERSIONS, xpForLevel, levelForXp,
 } from '../core/index.js';
 import { encodeString, readString } from '../core/binary.js';
 
@@ -142,6 +142,56 @@ for (const file of saveFiles) {
     assert.equal(edited.length - save.bytes.length, expectedDelta);
   });
 }
+
+const { skills: SKILLS } = JSON.parse(readFileSync(new URL('../src/data/items.json', import.meta.url), 'utf8'));
+
+test('skill level maths', () => {
+  const boat = [0, 2000, 5000, 10000];
+  assert.deepEqual([0, 1, 2, 3, 9].map((l) => xpForLevel(boat, l)), [0, 2000, 7000, 17000, 17000]);
+  assert.deepEqual([0, 1999, 2000, 6999.5, 7000, 1e9, NaN].map((xp) => levelForXp(boat, xp)), [0, 0, 1, 1, 2, 3, 3]);
+});
+
+for (const file of saveFiles) {
+  test(`${file}: skills match the catalog and can be edited`, () => {
+    const save = load(file);
+    assert.ok(save.skills.entries.length <= Object.keys(SKILLS).length);
+    for (const e of save.skills.entries) {
+      assert.ok(SKILLS[e.guid], `skill ${e.guid} is in the catalog`);
+      assert.equal(e.level, levelForXp(SKILLS[e.guid].steps, e.xp), `${SKILLS[e.guid].name} level matches its XP`);
+    }
+    if (!save.skills.entries.length) return;
+    const target = save.skills.entries[save.skills.entries.length - 1];
+    const { steps } = SKILLS[target.guid];
+    const level = target.level === steps.length - 1 ? 0 : steps.length - 1;
+    const edited = applyEdits(save, { skills: { [target.guid]: { xp: xpForLevel(steps, level), level } } });
+    assert.equal(edited.length, save.bytes.length);
+    let changed = 0;
+    for (let i = 0; i < edited.length; i++) if (edited[i] !== save.bytes[i]) changed++;
+    assert.ok(changed >= 1 && changed <= 8, `changed ${changed} bytes`);
+    const re = parseSave(edited);
+    assert.deepEqual(roundTripCheck(re), []);
+    const d = diffSaves(save, re);
+    assert.deepEqual(d.variables, []);
+    assert.deepEqual(d.inventory, []);
+    assert.equal(d.skills.length, 1);
+    assert.deepEqual(d.skills[0].after, { xp: xpForLevel(steps, level), level });
+    // untouched skills keep their exact bytes, including a NaN XP
+    for (const e of save.skills.entries.slice(0, -1)) {
+      assert.ok(Object.is(re.skills.entries.find((x) => x.guid === e.guid).xp, e.xp));
+    }
+  });
+}
+
+test('rejects invalid skill edits', { skip: saveFiles.length === 0 && 'no sample saves found' }, () => {
+  const save = load(saveFiles.find((f) => load(f).skills.entries.length) ?? saveFiles[0]);
+  const guid = save.skills.entries[0].guid;
+  assert.throws(() => applyEdits(save, { skills: { 'c8e0d9c0-0000-0000-0000-000000000000': { xp: 0, level: 0 } } }), UnsupportedEditError);
+  assert.throws(() => applyEdits(save, { skills: { [guid]: { xp: NaN, level: 1 } } }), UnsupportedEditError);
+  assert.throws(() => applyEdits(save, { skills: { [guid]: { xp: -1, level: 1 } } }), UnsupportedEditError);
+  assert.throws(() => applyEdits(save, { skills: { [guid]: { xp: 1e39, level: 1 } } }), UnsupportedEditError);
+  assert.throws(() => applyEdits(save, { skills: { [guid]: { xp: 10, level: 1.5 } } }), UnsupportedEditError);
+  assert.throws(() => applyEdits(save, { skills: { [guid]: { xp: 10 } } }), UnsupportedEditError);
+});
 
 test('rejects invalid inventory edits', { skip: saveFiles.length === 0 && 'no sample saves found' }, () => {
   const save = load(saveFiles[0]);

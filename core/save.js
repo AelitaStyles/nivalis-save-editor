@@ -7,16 +7,18 @@
 //   Ghost blocks  "Ghost_<guid>" tag, int32 absolute end offset, payload, closing tag
 //   player money  int32 cents directly after the player's Ghost block (duplicate of the header value)
 //   inventories   see inventory.js
+//   skills        see skills.js
 //
-// Money and variable edits are same-size. Inventory edits re-encode the inventory section, which can
+// Money, variable and skill edits are same-size. Inventory edits re-encode the inventory section, which can
 // change the file size; every Ghost block after the section then gets its end offset shifted.
 
 import {
-  readInt32, writeInt32, readFloat32, readString, encodeString,
+  readInt32, writeInt32, readFloat32, writeFloat32, readString, encodeString,
   asciiBytes, indexOf, bytesEqual,
 } from './binary.js';
 import { SaveFormatError, UnsupportedEditError } from './errors.js';
 import { parseInventory, encodeInventoryBody, validateInventoryItems } from './inventory.js';
+import { parseSkills, SKILLS_KEY } from './skills.js';
 
 export { SaveFormatError, UnsupportedEditError };
 
@@ -140,6 +142,7 @@ export function parseSave(input) {
   const tables = VARIABLE_TABLES.map((def) => parseVariableTable(bytes, def));
   const playerMoney = locatePlayerMoney(bytes, ghostBlocks);
   const inventory = parseInventory(bytes);
+  const skills = parseSkills(bytes);
 
   const warnings = [];
   if (playerMoney.value !== header.moneyCents) {
@@ -161,7 +164,7 @@ export function parseSave(input) {
     warnings.push('Variable tables have different lengths');
   }
 
-  return { bytes, header, ghostBlocks, tables, playerMoney, inventory, tablesConsistent, warnings };
+  return { bytes, header, ghostBlocks, tables, playerMoney, inventory, skills, tablesConsistent, warnings };
 }
 
 // Current in-game day as the game counts it (GameDay.Day, 1-based); used for newly added stacks.
@@ -211,7 +214,8 @@ export function formatCredits(cents) {
 }
 
 // Returns a new byte array with the edits applied and verified:
-//   edits = { moneyCents?, variables?: { name: value }, inventory?: { containerKey: items[] } }
+//   edits = { moneyCents?, variables?: { name: value }, inventory?: { containerKey: items[] },
+//             skills?: { skillGuid: { xp, level } } }
 // Inventory entries replace the full item list of that container ({ guid, stacks: [{ price, day, quantity, freshness }] }).
 export function applyEdits(save, edits) {
   const out = new Uint8Array(save.bytes);
@@ -253,6 +257,19 @@ export function applyEdits(save, edits) {
         }
       }
     }
+  }
+
+  for (const [guid, value] of Object.entries(edits.skills ?? {})) {
+    const entry = save.skills.entries.find((e) => e.guid === guid);
+    if (!entry) throw new UnsupportedEditError(`Skill ${guid} is not in this save yet; gain some XP in it in the game first`);
+    const { xp, level } = value;
+    if (typeof xp !== 'number' || !Number.isFinite(xp) || xp < 0 || !Number.isFinite(Math.fround(xp))) {
+      throw new UnsupportedEditError('Skill XP must be a number of 0 or more');
+    }
+    if (!Number.isInteger(level) || level < 0 || level > 1000) throw new UnsupportedEditError('Skill level must be a whole number of 0 or more');
+    writeFloat32(out, entry.xpOffset, xp);
+    for (let i = 0; i < 4; i++) changedOffsets.add(entry.xpOffset + i);
+    write32(entry.levelOffset, level);
   }
 
   for (let i = 0; i < out.length; i++) {
@@ -324,6 +341,15 @@ function verifyEdited(original, bytes, edits) {
   for (const [name, value] of Object.entries(edits.variables ?? {})) {
     if (vars.get(name) !== value) throw new SaveFormatError(`${name} did not verify after edit`);
   }
+  const skillEdits = edits.skills ?? {};
+  if (reparsed.skills.entries.length !== original.skills.entries.length) throw new SaveFormatError('Skill count changed after edit');
+  reparsed.skills.entries.forEach((e, i) => {
+    const before = original.skills.entries[i];
+    const expected = skillEdits[e.guid] ? { xp: Math.fround(skillEdits[e.guid].xp), level: skillEdits[e.guid].level } : before;
+    if (e.guid !== before.guid || !Object.is(e.xp, expected.xp) || e.level !== expected.level) {
+      throw new SaveFormatError(`Skill ${e.guid} did not verify after edit`);
+    }
+  });
   const invEdits = edits.inventory ?? {};
   if (reparsed.inventory.containers.length !== original.inventory.containers.length) {
     throw new SaveFormatError('Container count changed after edit');
@@ -358,6 +384,12 @@ export function roundTripCheck(save) {
   if (!bytesEqual(encodeInventoryBody(inventory.containers), save.bytes.subarray(inventory.bodyStart, inventory.end))) {
     problems.push('Inventory section does not re-encode identically');
   }
+  const { skills } = save;
+  const skillParts = [encodeString(SKILLS_KEY), int32Bytes(skills.entries.length)];
+  for (const e of skills.entries) skillParts.push(encodeString(e.guid), save.bytes.subarray(e.xpOffset, e.xpOffset + 4), int32Bytes(e.level));
+  if (!bytesEqual(concat(skillParts), save.bytes.subarray(skills.start, skills.end))) {
+    problems.push('Skill section does not re-encode identically');
+  }
   const money = save.header.moneyCents;
   if (readInt32(save.bytes, save.header.moneyOffset) !== money) problems.push('Header money mismatch');
   for (const b of save.ghostBlocks) {
@@ -382,7 +414,8 @@ function concat(parts) {
   return out;
 }
 
-// Differences between two saves: header values, variables and inventory quantities.
+// Differences between two saves: header values, variables, skills and inventory quantities.
+// Skill entries: { guid, before, after } with { xp, level } or undefined when the save lacks the skill.
 // Inventory entries: { container, guid, before, after } with total quantities; stacksChanged marks
 // items whose quantity is equal but whose stacks (freshness, day, price) differ.
 export function diffSaves(a, b) {
@@ -399,7 +432,20 @@ export function diffSaves(a, b) {
     before.delete(e.name);
   }
   for (const old of before.values()) variables.push({ name: old.name, kind: old.kind, before: old.value, after: undefined });
-  return { header, variables, inventory: diffInventories(a.inventory, b.inventory) };
+  return { header, variables, inventory: diffInventories(a.inventory, b.inventory), skills: diffSkills(a.skills, b.skills) };
+}
+
+function diffSkills(a, b) {
+  const pick = (e) => e && { xp: e.xp, level: e.level };
+  const before = new Map(a.entries.map((e) => [e.guid, e]));
+  const changes = [];
+  for (const e of b.entries) {
+    const old = before.get(e.guid);
+    if (!old || !Object.is(old.xp, e.xp) || old.level !== e.level) changes.push({ guid: e.guid, before: pick(old), after: pick(e) });
+    before.delete(e.guid);
+  }
+  for (const old of before.values()) changes.push({ guid: old.guid, before: pick(old), after: undefined });
+  return changes;
 }
 
 function diffInventories(a, b) {

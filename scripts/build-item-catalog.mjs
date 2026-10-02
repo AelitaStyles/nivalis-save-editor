@@ -1,4 +1,4 @@
-// Builds src/data/items.json (items, dishes, vendor and venue names) from a Nivalis Nights install:
+// Builds src/data/items.json (items, dishes, vendor and venue names, skills) from a Nivalis Nights install:
 //   node scripts/build-item-catalog.mjs "<Steam>/steamapps/common/Nivalis Nights"
 //
 // Item definitions are MonoBehaviours of one script class (item) or another (dish) in
@@ -145,9 +145,37 @@ function scanVenuePrefix(b, prefix, venues) {
   }
 }
 
+// Skills: aligned m_Name "Skill_<Name>", then the skill GUID. Its levels follow as serialized
+// objects: class "<X>Level", namespace "Nivalis.SkillSystem", assembly, int32 level, float XP cost.
+function scanSkills(b, skills) {
+  const found = [];
+  const prefix = Buffer.from('Skill_', 'latin1');
+  for (let i = b.indexOf(prefix); i !== -1; i = b.indexOf(prefix, i + 1)) {
+    const name = readAlignedString(b, i - 4);
+    const guid = name && /^Skill_\w+$/.test(name.value) ? readAlignedString(b, name.end) : null;
+    if (guid && GUID_RE.test(guid.value)) found.push({ name: name.value.slice(6), guid: guid.value, at: guid.end });
+  }
+  for (const [n, skill] of found.entries()) {
+    const end = Math.min(found[n + 1]?.at ?? b.length, skill.at + 20000, b.length - 64);
+    const steps = [];
+    for (let j = skill.at; j < end; j += 4) {
+      const cls = readAlignedString(b, j);
+      if (!cls || !/^[A-Za-z]+Level$/.test(cls.value)) continue;
+      const ns = readAlignedString(b, cls.end);
+      const asm = ns?.value === 'Nivalis.SkillSystem' ? readAlignedString(b, ns.end) : null;
+      if (asm?.value !== 'Assembly-CSharp') continue;
+      if (b.readInt32LE(asm.end) !== steps.length) throw new Error(`Levels of skill ${skill.name} are not in order; the asset layout changed`);
+      steps.push(b.readFloatLE(asm.end + 4));
+      j = asm.end + 4;
+    }
+    if (steps.length > 1) skills[skill.guid] ??= { name: skill.name, steps };
+  }
+}
+
 const items = {};
 const vendors = {};
 const venues = {};
+const skills = {};
 const files = ['sharedassets0.assets', 'resources.assets'].map((f) => {
   console.log(`Scanning ${f}…`);
   const b = readFileSync(join(dataDir, f));
@@ -159,13 +187,14 @@ console.log(`Script classes: ${JSON.stringify(classes)}`);
 for (const { b, candidates } of files) {
   collect(b, candidates, classes, items, vendors);
   scanVenues(b, venues);
+  scanSkills(b, skills);
 }
-if (!Object.keys(items).length || !Object.keys(vendors).length || !Object.keys(venues).length) {
-  console.error('Found no items, vendors or venues; the asset layout changed. Catalog left untouched.');
+if (!Object.keys(items).length || !Object.keys(vendors).length || !Object.keys(venues).length || !Object.keys(skills).length) {
+  console.error('Found no items, vendors, venues or skills; the asset layout changed. Catalog left untouched.');
   process.exit(1);
 }
 const sorted = Object.fromEntries(Object.entries(items).sort((a, b) => a[1].name.localeCompare(b[1].name)));
 mkdirSync(dirname(outFile), { recursive: true });
-writeFileSync(outFile, `${JSON.stringify({ generated: new Date().toISOString().slice(0, 10), items: sorted, vendors, venues })}\n`);
+writeFileSync(outFile, `${JSON.stringify({ generated: new Date().toISOString().slice(0, 10), items: sorted, vendors, venues, skills })}\n`);
 const counts = Object.values(sorted).reduce((m, e) => ({ ...m, [e.kind]: (m[e.kind] ?? 0) + 1 }), {});
-console.log(`Wrote ${outFile}: ${JSON.stringify(counts)}, ${Object.keys(vendors).length} vendors, ${Object.keys(venues).length} venues`);
+console.log(`Wrote ${outFile}: ${JSON.stringify(counts)}, ${Object.keys(vendors).length} vendors, ${Object.keys(venues).length} venues, ${Object.keys(skills).length} skills`);

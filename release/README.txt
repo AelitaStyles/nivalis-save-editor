@@ -5,6 +5,8 @@ Source code: https://github.com/HiveSolution/nivalis-save-editor
 WHAT IT DOES
   - Lists your saves with their screenshots, location, in-game day and playtime
   - Edit your money
+  - Set the level of your skills (Barter, Boat, Cooking, Farming, Fishing,
+    Serving, Managing)
   - Edit inventories: your own, your venues' storage, fridges and furniture,
     and vendor stock. Add any of 1,300+ items, change quantities and
     freshness, or make all food fresh again
@@ -42,6 +44,8 @@ GOOD TO KNOW
     break quest steps. Try changes on a copy of a save first if unsure.
   - The in-game clock cannot be edited (it is stored in hundreds of places).
   - Text variables are shown but cannot be edited yet.
+  - A skill can be edited once you have gained some XP in it in the game.
+    Setting a level puts its XP at the start of that level.
   - Added items are free and start fully fresh. Items that need a fridge are
     marked, and you get a warning when adding them to normal storage.
   - Steam Cloud syncs your saves, so an edited save replaces the cloud copy.
